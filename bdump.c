@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <getopt.h>
 #include <locale.h>
@@ -359,6 +360,7 @@ int main(const int argc, char *argv[])
                 break;
             case 'b':
                 format = F_BIN;
+                /* For binary output, set the default line width to 8. */
                 line_width = 8;
                 break;
             case 's': {
@@ -414,7 +416,7 @@ int main(const int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    /* Call fseek() if --skip-bytes is used. */
+    /* Call fseek() if --start-offset is used. */
     if (offset != 0) {
         fseek(input, offset, SEEK_SET);
     }
