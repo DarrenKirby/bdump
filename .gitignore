@@ -1,3 +1,7 @@
+# The binary an object files
+bdump
+bdump.o
+
 # Prerequisites
 *.d
 
