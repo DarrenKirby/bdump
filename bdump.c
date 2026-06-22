@@ -1,5 +1,5 @@
 /*
- * '/bdump.c'
+ * 'bdump.c'
  * This file is part of bdump - https://github.com/DarrenKirby/bdump
  * Copyright © 2026 Darren Kirby <darren@dragonbyte.ca>
  *
@@ -25,6 +25,8 @@
 #include <string.h>
 #include <getopt.h>
 #include <locale.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 
 #define APPNAME "bdump"
@@ -39,6 +41,10 @@
 #define CROSS    0x253C
 #define MID_DOT  0x00B7
 
+/* This is an arbitrary constant that sets the upper
+ * limit for typed input in lieu of file arguments. */
+#define MAX_READ_BYTES 5096
+
 typedef enum int8_t {
     F_HEX,
     F_OCT,
@@ -50,6 +56,9 @@ typedef enum int8_t {
 format_t format = F_HEX;
 /* Default line_width: 16 */
 uint8_t line_width = 16;
+/* Default is to read all bytes. This value will be filled by
+ * call to stat() if --read-size is not used. */
+size_t read_size = 0;
 
 
 void show_help(void)
@@ -64,10 +73,27 @@ Options:\n\
   General options:\n\
     -l, --line-width=n\t print n bytes per line\n\
     -s, --start-offset=n start output at offset n\n\
-    -n, --read-bytes=n\t read only n bytes and exit\n\
+    -r, --read-size=n\t read only n bytes\n\
     -h, --help\t\t display this help\n\
     -V, --version\t display version information\n\n\
 Report bugs to <darren@dragonbyte.ca>\n", APPNAME);
+}
+
+
+size_t get_file_size(const int fd)
+{
+    struct stat buf;
+    if (fstat(fd, &buf) == -1) {
+        fprintf(stderr, "fstat failed: %s\n",
+            strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    if (!S_ISREG(buf.st_mode)) {
+        /* Input was either piped or no input was supplied.
+         * just return an arbitrary large number. */
+        return MAX_READ_BYTES;
+    }
+    return buf.st_size;
 }
 
 
@@ -75,11 +101,13 @@ int32_t get_term_width(void)
 {
     struct winsize w;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != 0) {
-        perror("failed to get terminal width");
+        fprintf(stderr, "ioctl failed: %s\n",
+            strerror(errno));
         exit(EXIT_FAILURE);
     }
     return w.ws_col;
 }
+
 
 /* Calculate the width of the binary section based on output
  * format and line_width. */
@@ -110,15 +138,22 @@ void byte_to_binary_string(const uint8_t byte, char *str)
 }
 
 
-/* Read <line_width> bytes from the file into the buffer. */
+/* Read <line_width> or <read_size> bytes from the file
+ * into the buffer, whichever is smaller. */
 size_t read_input(FILE* input, uint8_t *buffer)
 {
-    const size_t bytes_read = fread(buffer, 1, line_width, input);
+    unsigned long rs;
+    if (read_size < line_width) {
+        rs = read_size;
+    } else {
+        rs = line_width;
+    }
+    const size_t bytes_read = fread(buffer, 1, rs, input);
     return bytes_read;
 }
 
 
-/* Write the offset-well section of output. */
+/* Write the offset well section of output. */
 int write_well(const int32_t offset, const size_t bytes_read)
 {
     switch (format) {
@@ -200,6 +235,7 @@ void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
 
     for (size_t i = 0; i < bytes_read; i++) {
+        /* Range of ascii-printable chars. */
         if (buffer[i] >= 0x20 && buffer[i] < 0x7F) {
             printf("%c", buffer[i]);
         } else {
@@ -332,6 +368,7 @@ int main(const int argc, char *argv[])
 {
     setlocale(LC_ALL, "");
     int opt;
+    int32_t offset = 0;
 
     const struct option longopts[] = {
         {"hex",          no_argument,       nullptr, 'x'},
@@ -339,16 +376,15 @@ int main(const int argc, char *argv[])
         {"dec",          no_argument,       nullptr, 'd'},
         {"bin",          no_argument,       nullptr, 'b'},
         {"start-offset", required_argument, nullptr, 's'},
-        {"read-bytes",   required_argument, nullptr, 'n'},
+        {"read-size",    required_argument, nullptr, 'r'},
         {"line-width",   required_argument, nullptr, 'l'},
         {"help",         no_argument,       nullptr, 'h'},
         {"version",      no_argument,       nullptr, 'V'},
         {nullptr,0,nullptr,0}
     };
 
-    int32_t offset = 0;
 
-    while ((opt = getopt_long(argc, argv, "Vhxodbs:n:l:", longopts, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "xodbs:r:l:hV", longopts, nullptr)) != -1) {
         switch(opt) {
             case 'x':
                 format = F_HEX;
@@ -369,10 +405,19 @@ int main(const int argc, char *argv[])
                 offset = (int32_t)start_offset;
                 break;
             }
+            case 'r': {
+                const long int rb = strtol(optarg, nullptr, 10);
+                if (rb < 0) {
+                    printf("--read-size argument cannot be negative): %ld\n", rb);
+                    exit(EXIT_FAILURE);
+                }
+                read_size = (size_t)rb;
+                break;
+            }
             case 'l': {
                 const long int width = strtol(optarg, nullptr, 10);
                 if (width < 0 || width > 255) {
-                    printf("invalid width: %ld\n", width);
+                    printf("invalid width for --line-width: %ld\n", width);
                     exit(EXIT_FAILURE);
                 }
                 line_width = (uint8_t)width;
@@ -400,12 +445,23 @@ int main(const int argc, char *argv[])
     /* Open arg/stdin for reading. */
     FILE* input;
     char* filename;
-    if (argc > 1) {
+    /* Ensure we only call fopen() on passed args,
+     * and not on shell I/O redirects. */
+    if (optind < argc) {
         input = fopen(argv[optind], "r");
+        if (!input) {
+            fprintf(stderr, "failed to open %s: %s\n",
+                argv[optind], strerror(errno));
+        }
         filename = argv[optind];
     } else {
         input = stdin;
         filename = "STDIN";
+    }
+
+    /* Get file size if read_size not set. */
+    if (read_size == 0) {
+        read_size = get_file_size(fileno(input));
     }
 
     print_banner(filename);
@@ -413,13 +469,18 @@ int main(const int argc, char *argv[])
     /* Allocate the byte buffer based on line_width. */
     uint8_t *buffer = malloc(sizeof(int8_t) * line_width);
     if (!buffer) {
-        printf("failed to allocate buffer\n");
+        fprintf(stderr, "failed to allocate buffer\n");
         exit(EXIT_FAILURE);
     }
 
     /* Call fseek() if --start-offset is used. */
     if (offset != 0) {
-        fseek(input, offset, SEEK_SET);
+        if (fseek(input, offset, SEEK_SET) < 0) {
+            fprintf(stderr, "failed to seek to offset %d: %s\n",
+                offset, strerror(errno));
+            /* Not a fatal error; just set offset to 0. */
+            offset = 0;
+        }
     }
 
     while (true) {
@@ -429,6 +490,7 @@ int main(const int argc, char *argv[])
             break;
         }
         offset += (int32_t)bytes_read;
+        read_size -= bytes_read;
     }
 
     print_footer();
