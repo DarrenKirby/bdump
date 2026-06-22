@@ -2,6 +2,13 @@
 
 A modern-ish remake of `od`, `hexdump`, `xxd`, and similar byte-dumping utilities.
 
+![A screenshot of bdump](./img/screenshot1.png "Screenshot 1")
+
+![A screenshot of bdump](./img/screenshot2.png "Screenshot 2")
+
+![A screenshot of bdump](./img/screenshot3.png "Screenshot 3")
+
+
 ## Synopsis
 
 ```text
