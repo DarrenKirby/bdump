@@ -1,0 +1,101 @@
+.TH BDUMP 1 "June 2026" "User Manuals"
+
+.SH NAME
+bdump \- rizzed up modernish remake of
+.I od
+,
+.I hexdump
+,
+.I xxd
+et al
+
+.SH SYNOPSIS
+.B foo [-xodbhV] [-s
+.I n_bytes
+.B ] [-r
+.I n_bytes
+.B ] [-l
+.I n_bytes
+.B ]
+.I FILE|STDIN
+
+
+.SH DESCRIPTION
+.B bdump
+prints unambiguous representations of individual bytes to STDOUT, as well as a textual representation of bytes which
+fall into the range of ascii-printable characters.
+.PP
+It takes a FILE name as argument, or reads from STDIN if FILE is not provided. Read the
+.B BUGS
+section for the practical ramifications of FILE versus STDIN input.
+.PP
+.B bdump
+divides its output into four logically separate 'cells' using the unicode box-drawing glyphs.
+At the top is a banner which (for now) just prints the name of
+the file being dumped. Below the banner, the output is divided into three different cells. From L to R they are:
+.PP
+The
+.I offset well.
+This is a fixed-width cell that prints the beginning offset of each line in the format chosen by the
+user. By default, this format is hexidecimal. The bottom line of this cell will hold a value by itself, which is
+ultimately the size of the file dumped.
+.PP
+The
+.I data dump
+cell. This is the main cell where the bytes are printed in the radix format chosen by the user. This format is
+unsigned hexidecimal by default, but can be changed to unsigned octal, unsigned decimal, or unsigned binary using
+command line flags. Note that changing the radix format will also change the format displayed in the offset well
+EXCEPT for binary output, in which case the offset well will display the offsets in hexidecimal.
+.PP
+The
+.I ascii dump
+cell prints bytes which fall within the range of ascii-printable characters as those characters, else represents the
+non-printable bytes as Unicode glyph \\x00B7 aka the 'middle dot'.
+.PP
+The number of bytes written per line can be set using the
+.I --line-width
+argument. The default value is 16. Regardless of this value, each line will start with the offset of the first byte,
+the bytes themselves in the chosen format, and the ascii representations (if representable) of the same bytes.
+.SH OPTIONS
+.TP
+\fB-h or --help\fP
+Print quick usage details to the screen.
+.TP
+\fB-V or --version\fP
+Print version information to the screen.
+.TP
+\fB-h or --hex\fP
+Format output in hexidecimal format. This is the default.
+.TP
+\fB-o or --oct\fP
+Format output in octal format.
+.TP
+\fB-d or --dec\fP
+Format output in unsigned decimal format.
+.TP
+\fB-b or --bin\fP
+Format output as binary bit-strings. Note that the offset will be displayed in hexidecimal.
+.TP
+\fB-lN or --line-width=N\fP
+Display N bytes per row. This arg is hard-capped at 255, however, it is advised to not use much more than 48 depending
+on the width of your terminal.
+.TP
+\fB-sN or --start-offset=N\fP
+Start the dump N bytes into the input, ie: skip the first N bytes of the file.
+.TP
+\fB-rN or --read-size=N\fP
+Stop dumping after N bytes. Note that this and the previous option can be combined to select arbitrary slices of the file.
+.TP
+.SH BUGS
+While the
+.I --start-offset
+flag works just fine with explicitly-redirected input (ie: bdump < somefile) because the OS maps the STDIN file
+descriptor to the actual file being redirected, input that is piped into the command cannot be fseek()'ed, and therefore,
+if the input comes from a pipe, fseek will print an error, and the offset will otherwise be silently changed to '0', ie:
+the content will be dumped from the first byte.
+.SH AUTHOR
+Darren Kirby <darren@dragonbyte.ca>
+.SH "SEE ALSO"
+.BR od (1),
+.BR hexdump (1),
+.BR xxd (1)
