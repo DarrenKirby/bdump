@@ -1,6 +1,7 @@
 # bdump
 
-A modern-ish remake of `od`, `hexdump`, `xxd`, and similar byte-dumping utilities.
+A modern-ish remake of `od`, `hexdump`, `xxd`, and similar byte-dumping utilities. The look and feel is largely inspired by 
+[bat](https://github.com/sharkdp/bat).
 
 ![A screenshot of bdump](./img/screenshot1.png "Screenshot 1")
 
@@ -131,6 +132,10 @@ cat myfile.bin | bdump -s 100
 In this situation, `fseek()` will fail and print an error message. The offset is then reset to zero and dumping proceeds from the beginning of the stream.
 
 This limitation is inherent to non-seekable input streams such as pipes and sockets.
+
+Additionally, while you can start `bdump` with no FILE arguments or redirects to input data directly from the keyboard, due to 
+the internal buffer nothing will be output until an entire line of data has been entered (by default 16 bytes, but configurable
+via `--line-width`), or by sending an EOF character by using `ctrl+d`.
 
 ## Author
 
