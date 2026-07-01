@@ -1,7 +1,7 @@
 .TH BDUMP 1 "June 2026" "User Manuals"
 
 .SH NAME
-bdump \- rizzed up modernish remake of
+bdump \- rizzed up remake of
 .I od
 ,
 .I hexdump
@@ -10,7 +10,7 @@ bdump \- rizzed up modernish remake of
 et al
 
 .SH SYNOPSIS
-.B foo [-xodbhV] [-s
+.B foo [-xodbnhV] [-s
 .I n_bytes
 .B ] [-r
 .I n_bytes
@@ -76,6 +76,10 @@ Format output in unsigned decimal format.
 \fB-b or --bin\fP
 Format output as binary bit-strings. Note that the offset will be displayed in hexidecimal.
 .TP
+\fB-n or --no-elide\fP
+By default, 2+ lines of just zero bytes (NULLs) are elided, and replaced with a message which states how many lines
+were elided. With this option, all of the zero-byte lines are printed.
+.TP
 \fB-lN or --line-width=N\fP
 Display N bytes per row. This arg is hard-capped at 255, however, it is advised to not use much more than 48 depending
 on the width of your terminal.
@@ -94,6 +98,8 @@ flag works just fine with explicitly-redirected input (ie: bdump < somefile) bec
 descriptor to the actual file being redirected, input that is piped into the command cannot be fseek()'ed, and therefore,
 if the input comes from a pipe, fseek will print an error, and the offset will otherwise be silently changed to '0', ie:
 the content will be dumped from the first byte.
+.PP
+It's pretty slow on large files. Need to implement a lookup table to construct the byte representations rather than using snprintf().
 .SH AUTHOR
 Darren Kirby <darren@dragonbyte.ca>
 .SH "SEE ALSO"
