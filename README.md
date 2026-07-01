@@ -96,6 +96,11 @@ Display output as binary bit strings.
 
 Offsets remain displayed in hexadecimal.
 
+### `-n`, `---no-elide`
+
+By default, 2+ lines of just zero bytes (NULLs) are elided, and replaced with a message which states how many lines
+were elided. With this option, all the zero-byte lines are printed.
+
 ### `-l N`, `--line-width=N`
 
 Display `N` bytes per output row.
