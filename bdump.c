@@ -45,6 +45,9 @@
  * limit for typed input in lieu of file arguments. */
 #define MAX_READ_BYTES 5096
 
+/* L1/L2 cache friendly buffer size. */
+#define CHUNK_SIZE 65536
+
 typedef enum int8_t {
     F_HEX,
     F_OCT,
@@ -71,6 +74,7 @@ Options:\n\
     -d, --dec\t\t decimal format\n\
     -b, --bin\t\t binary format\n\
   General options:\n\
+    -n, --no-elide\t don't elide lines of NULL bytes\n\
     -l, --line-width=n\t print n bytes per line\n\
     -s, --start-offset=n start output at offset n\n\
     -r, --read-size=n\t read only n bytes\n\
@@ -117,13 +121,13 @@ int32_t get_bin_width(void)
         case F_DEC:
         case F_OCT:
             /* OCT and DEC: 3 chars + 1 space for each + 2 spaces on each end. */
-            return line_width * 4 + 2;
+            return line_width * 4 + 1;
         case F_BIN:
             /* BIN: 8 chars + 1 space for each + 2 spaces on each end. */
-            return line_width * 9 + 2;
+            return line_width * 9 + 1;
         default:
             /* HEX: 2 chars + 1 space for each + 2 spaces on each end. */
-            return line_width * 3 + 2;
+            return line_width * 3 + 1;
     }
 }
 
@@ -249,7 +253,7 @@ void write_ascii(const uint8_t *buffer, const size_t bytes_read)
             printf(" ");
         }
     }
-    printf(" %lc ", VERT_BAR);
+    printf(" %lc", VERT_BAR);
     printf("\n");
 }
 
@@ -272,8 +276,46 @@ void write_output(const uint8_t *buffer, const int32_t offset, const size_t byte
         return;
     }
     write_binary_dump(buffer, bytes_read);
-    printf(" %lc ", VERT_BAR);
+    printf("%lc ", VERT_BAR);
     write_ascii(buffer, bytes_read);
+}
+
+void print_elide_line(uint32_t n_lines) {
+    /* Get the target width of the middle cell. */
+    int32_t bin_width = get_bin_width();
+
+    /* We need the length of it to calculate padding,
+     * so format the message into a temporary buffer. */
+    char msg[128];
+    int msg_len = snprintf(msg, sizeof(msg), "   *** %u line%s of zero-bytes elided ***",
+        n_lines, n_lines == 1 ? "" : "s");
+
+    /* Print the left well (12 spaces) and the first vertical bar. */
+    for (int i = 0; i < WELL_WIDTH; i++) {
+        printf(" ");
+    }
+    printf("%lc", VERT_BAR);
+
+    /* Print the elision message. */
+    printf("%s", msg);
+
+    /* Calculate and print the remaining gap to the next border. */
+    if (msg_len < bin_width) {
+        int gap = bin_width - msg_len;
+        for (int i = 0; i < gap; i++) {
+            printf(" ");
+        }
+    }
+
+    printf("%lc", VERT_BAR);
+
+    /* Pad the ASCII section. */
+    for (int i = 0; i < line_width + 2; i++) {
+        printf(" ");
+    }
+
+    /* Print the final vertical bar and newline. */
+    printf("%lc\n", VERT_BAR);
 }
 
 
@@ -370,11 +412,20 @@ int main(const int argc, char *argv[])
     int opt;
     int32_t offset = 0;
 
+    /* Zeroed-out memory to compare for lines of just nul bytes. */
+    static const uint8_t zero_block[256] = {0};
+    /* Counter of elided lines. */
+    uint32_t n_elided = 0;
+    /* Flag for whether to elide or not. */
+    uint8_t elide = 1;
+
+
     const struct option longopts[] = {
         {"hex",          no_argument,       nullptr, 'x'},
         {"oct",          no_argument,       nullptr, 'o'},
         {"dec",          no_argument,       nullptr, 'd'},
         {"bin",          no_argument,       nullptr, 'b'},
+        {"no-elide",     no_argument,       nullptr, 'n'},
         {"start-offset", required_argument, nullptr, 's'},
         {"read-size",    required_argument, nullptr, 'r'},
         {"line-width",   required_argument, nullptr, 'l'},
@@ -384,7 +435,7 @@ int main(const int argc, char *argv[])
     };
 
 
-    while ((opt = getopt_long(argc, argv, "xodbs:r:l:hV", longopts, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "xodbns:r:l:hV", longopts, nullptr)) != -1) {
         switch(opt) {
             case 'x':
                 format = F_HEX;
@@ -400,6 +451,9 @@ int main(const int argc, char *argv[])
                 /* For binary output, set the default line width to 8. */
                 line_width = 8;
                 break;
+            case 'n':
+                elide = 0;
+                break;
             case 's': {
                 const long int start_offset = strtol(optarg, nullptr, 10);
                 offset = (int32_t)start_offset;
@@ -408,7 +462,7 @@ int main(const int argc, char *argv[])
             case 'r': {
                 const long int rb = strtol(optarg, nullptr, 10);
                 if (rb < 0) {
-                    printf("--read-size argument cannot be negative): %ld\n", rb);
+                    fprintf(stderr, "--read-size argument cannot be negative): %ld\n", rb);
                     exit(EXIT_FAILURE);
                 }
                 read_size = (size_t)rb;
@@ -417,7 +471,7 @@ int main(const int argc, char *argv[])
             case 'l': {
                 const long int width = strtol(optarg, nullptr, 10);
                 if (width < 0 || width > 255) {
-                    printf("invalid width for --line-width: %ld\n", width);
+                    fprintf(stderr, "invalid width for --line-width: %ld\n", width);
                     exit(EXIT_FAILURE);
                 }
                 line_width = (uint8_t)width;
@@ -452,6 +506,7 @@ int main(const int argc, char *argv[])
         if (!input) {
             fprintf(stderr, "failed to open %s: %s\n",
                 argv[optind], strerror(errno));
+            exit(EXIT_FAILURE);
         }
         filename = argv[optind];
     } else {
@@ -483,18 +538,66 @@ int main(const int argc, char *argv[])
         }
     }
 
-    while (true) {
-        const size_t bytes_read = read_input(input, buffer);
-        write_output(buffer, offset, bytes_read);
-        if (bytes_read == 0) {
-            break;
+    /* This forces printf to buffer 64KB before calling write(). */
+    char stdout_buffer[CHUNK_SIZE];
+    setvbuf(stdout, stdout_buffer, _IOFBF, sizeof(stdout_buffer));
+
+
+    uint8_t *file_buf = malloc(CHUNK_SIZE);
+    if (!file_buf) {
+        fprintf(stderr, "failed to allocate buffer\n");
+        exit(EXIT_FAILURE);
+    }
+
+    while (read_size > 0) {
+        /* Determine how much to read into the big block. */
+        const size_t to_read = (read_size < CHUNK_SIZE) ? read_size : CHUNK_SIZE;
+        const size_t bytes_read = fread(file_buf, 1, to_read, input);
+
+        if (bytes_read == 0) break;
+
+        size_t i = 0;
+        /* Slice the big block into line_width chunks. */
+        while (i < bytes_read) {
+            const size_t chunk_len = (bytes_read - i < line_width) ? bytes_read - i : line_width;
+
+            const bool is_zero = (memcmp(&file_buf[i], zero_block, chunk_len) == 0);
+
+            if (elide) {
+                if (is_zero) {
+                    n_elided++;
+                    if (n_elided == 1) {
+                        /* It's the first row of zeros. Print it normally. */
+                        write_output(&file_buf[i], offset, chunk_len);
+                    }
+                } else {
+                    if (n_elided > 1) {
+                        /* Already printed the first one, so we actually skipped (n_elided - 1). */
+                        print_elide_line(n_elided - 1);
+                    }
+
+                    n_elided = 0;
+
+                    /* Print the current non-zero row. */
+                    write_output(&file_buf[i], offset, chunk_len);
+                }
+            } else {
+                write_output(&file_buf[i], offset, chunk_len);
+            }
+
+            offset += (int32_t)chunk_len;
+            i += chunk_len;
         }
-        offset += (int32_t)bytes_read;
         read_size -= bytes_read;
+    }
+
+    if (n_elided > 1) {
+        print_elide_line(n_elided - 1);
     }
 
     print_footer();
 
     free(buffer);
+    free(file_buf);
     return EXIT_SUCCESS;
 }
