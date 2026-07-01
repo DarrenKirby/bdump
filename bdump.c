@@ -41,6 +41,10 @@
 #define CROSS    0x253C
 #define MID_DOT  0x00B7
 
+/* Static lookup tables for formatting hex and oct strings. */
+static const char hex_chars[] = "0123456789abcdef";
+static const char oct_chars[] = "01234567"; 
+
 /* This is an arbitrary constant that sets the upper
  * limit for typed input in lieu of file arguments. */
 #define MAX_READ_BYTES 5096
@@ -103,6 +107,12 @@ size_t get_file_size(const int fd)
 
 int32_t get_term_width(void)
 {
+    /* Check if stdout is redirected to a file or a pipe. */
+    if (!isatty(STDOUT_FILENO)) {
+        /* This is width of default line-width and hex output. */
+        return 82;
+    }
+
     struct winsize w;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != 0) {
         fprintf(stderr, "ioctl failed: %s\n",
@@ -120,13 +130,13 @@ int32_t get_bin_width(void)
     switch (format) {
         case F_DEC:
         case F_OCT:
-            /* OCT and DEC: 3 chars + 1 space for each + 2 spaces on each end. */
+            /* OCT and DEC: 3 chars + 1 space for each + 1 space left side. */
             return line_width * 4 + 1;
         case F_BIN:
-            /* BIN: 8 chars + 1 space for each + 2 spaces on each end. */
+            /* BIN: 8 chars + 1 space for each + 1 space on left side. */
             return line_width * 9 + 1;
         default:
-            /* HEX: 2 chars + 1 space for each + 2 spaces on each end. */
+            /* HEX: 2 chars + 1 space for each + 1 space on left side. */
             return line_width * 3 + 1;
     }
 }
@@ -139,21 +149,6 @@ void byte_to_binary_string(const uint8_t byte, char *str)
         str[i] = (byte & (0x80 >> i)) ? '1' : '0';
     }
     str[8] = '\0';
-}
-
-
-/* Read <line_width> or <read_size> bytes from the file
- * into the buffer, whichever is smaller. */
-size_t read_input(FILE* input, uint8_t *buffer)
-{
-    unsigned long rs;
-    if (read_size < line_width) {
-        rs = read_size;
-    } else {
-        rs = line_width;
-    }
-    const size_t bytes_read = fread(buffer, 1, rs, input);
-    return bytes_read;
 }
 
 
@@ -192,16 +187,32 @@ int write_well(const int32_t offset, const size_t bytes_read)
 /* Write the binary dump section of output. */
 void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 {
+    /* A stack buffer large enough for the widest format (BIN: 9 chars * 255 bytes max = 2295). */
+    char line_buf[4096]; 
+    size_t pos = 0;
+
     switch (format) {
+        case F_HEX: {
+            for (size_t i = 0; i < bytes_read; i++) {
+                line_buf[pos++] = hex_chars[(buffer[i] >> 4) & 0x0F];
+                line_buf[pos++] = hex_chars[buffer[i] & 0x0F];
+                line_buf[pos++] = ' ';
+            }
+            break;
+        }
         case F_OCT: {
             for (size_t i = 0; i < bytes_read; i++) {
-                printf("%03o ", buffer[i]);
+                line_buf[pos++] = oct_chars[(buffer[i] >> 6) & 0x07];
+                line_buf[pos++] = oct_chars[(buffer[i] >> 3) & 0x07];
+                line_buf[pos++] = oct_chars[buffer[i] & 0x07];
+    
+                line_buf[pos++] = ' ';
             }
             break;
         }
         case F_DEC: {
             for (size_t i = 0; i < bytes_read; i++) {
-                printf("%03d ", buffer[i]);
+                pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%3d ", buffer[i]);
             }
             break;
         }
@@ -209,52 +220,56 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
             for (size_t i = 0; i < bytes_read; i++) {
                 char bitstring[9];
                 byte_to_binary_string(buffer[i], bitstring);
-                printf("%s ", bitstring);
+                pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%s ", bitstring);
             }
             break;
         }
-        default: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                printf("%02x ", buffer[i]);
-            }
-        }
+        default:
+            return;
     }
+
+    /* Handle the padding gap exactly. */ 
     if (bytes_read < line_width) {
         const size_t gap = line_width - bytes_read;
-        for (size_t i = 0; i < gap; i++) {
-            if (format == F_OCT || format == F_DEC) {
-                printf("    ");
-            } else if (format == F_BIN) {
-                printf("         ");
-            } else {
-                printf("   ");
-            }
-        }
+        const int pad_chars = (format == F_OCT || format == F_DEC) ? 4 : (format == F_BIN ? 9 : 3);
+        
+        memset(&line_buf[pos], ' ', gap * pad_chars);
+        pos += gap * pad_chars;
     }
+
+    fwrite(line_buf, 1, pos, stdout);
 }
 
-
-/* Write the ascii string section of output. */
 void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
+    char ascii_buf[512]; 
+    size_t pos = 0;
 
     for (size_t i = 0; i < bytes_read; i++) {
-        /* Range of ascii-printable chars. */
         if (buffer[i] >= 0x20 && buffer[i] < 0x7F) {
-            printf("%c", buffer[i]);
+            ascii_buf[pos++] = (char)buffer[i];
         } else {
-            printf("%lc", MID_DOT);
+            /* Add the UTF-8 bytes for MID_DOT. */
+            ascii_buf[pos++] = (char)0xC2;
+            ascii_buf[pos++] = (char)0xB7;
         }
     }
 
+    /* Handle the padding gap. */
     if (bytes_read < line_width) {
         const size_t gap = line_width - bytes_read;
-        for (size_t i = 0; i < gap; i++) {
-            printf(" ");
-        }
+        memset(&ascii_buf[pos], ' ', gap);
+        pos += gap;
     }
-    printf(" %lc", VERT_BAR);
-    printf("\n");
+
+    /* Add the final VERT_BAR. */
+    ascii_buf[pos++] = ' ';
+    ascii_buf[pos++] = (char)0xE2;
+    ascii_buf[pos++] = (char)0x94;
+    ascii_buf[pos++] = (char)0x82;
+    ascii_buf[pos++] = '\n';
+
+    fwrite(ascii_buf, 1, pos, stdout);
 }
 
 
@@ -280,11 +295,11 @@ void write_output(const uint8_t *buffer, const int32_t offset, const size_t byte
     write_ascii(buffer, bytes_read);
 }
 
-void print_elide_line(uint32_t n_lines) {
-    /* Get the target width of the middle cell. */
+void print_elide_line(const uint32_t n_lines)
+{
     int32_t bin_width = get_bin_width();
 
-    /* We need the length of it to calculate padding,
+    /* We need the length of msg to calculate padding,
      * so format the message into a temporary buffer. */
     char msg[128];
     int msg_len = snprintf(msg, sizeof(msg), "   *** %u line%s of zero-bytes elided ***",
@@ -406,19 +421,36 @@ void print_footer()
 }
 
 
+int64_t validate_numeric_arg(char* arg, const int32_t max_val, char* flag) {
+    const long int value = strtol(arg, nullptr, 10);
+    if (value == 0) {
+        fprintf(stderr, "Invalid number: %s\n", arg);
+        exit(EXIT_FAILURE);
+    }
+    if (value < 0 ) {
+        fprintf(stderr, "Negative values not valid for %s\n", flag);
+        exit(EXIT_FAILURE);
+    }
+    if (max_val != 0 && value > max_val) {
+        fprintf(stderr, "Argument too large for %s\n", flag);
+        exit(EXIT_FAILURE);
+    }
+    return value;
+}
+
+
 int main(const int argc, char *argv[])
 {
     setlocale(LC_ALL, "");
     int opt;
     int32_t offset = 0;
 
-    /* Zeroed-out memory to compare for lines of just nul bytes. */
+    /* Zeroed-out memory to compare for lines of just NULL bytes. */
     static const uint8_t zero_block[256] = {0};
     /* Counter of elided lines. */
     uint32_t n_elided = 0;
     /* Flag for whether to elide or not. */
-    uint8_t elide = 1;
-
+    bool elide = 1;
 
     const struct option longopts[] = {
         {"hex",          no_argument,       nullptr, 'x'},
@@ -455,26 +487,15 @@ int main(const int argc, char *argv[])
                 elide = 0;
                 break;
             case 's': {
-                const long int start_offset = strtol(optarg, nullptr, 10);
-                offset = (int32_t)start_offset;
+                offset = (int32_t)validate_numeric_arg(optarg, 0, "--start-offset");
                 break;
             }
             case 'r': {
-                const long int rb = strtol(optarg, nullptr, 10);
-                if (rb < 0) {
-                    fprintf(stderr, "--read-size argument cannot be negative): %ld\n", rb);
-                    exit(EXIT_FAILURE);
-                }
-                read_size = (size_t)rb;
+                read_size = (size_t)validate_numeric_arg(optarg, 0, "--read-size");
                 break;
             }
             case 'l': {
-                const long int width = strtol(optarg, nullptr, 10);
-                if (width < 0 || width > 255) {
-                    fprintf(stderr, "invalid width for --line-width: %ld\n", width);
-                    exit(EXIT_FAILURE);
-                }
-                line_width = (uint8_t)width;
+                line_width = (uint8_t)validate_numeric_arg(optarg, 255, "--line-width");
                 break;
             }
             case 'V':
@@ -521,22 +542,26 @@ int main(const int argc, char *argv[])
 
     print_banner(filename);
 
-    /* Allocate the byte buffer based on line_width. */
-    uint8_t *buffer = malloc(sizeof(int8_t) * line_width);
-    if (!buffer) {
-        fprintf(stderr, "failed to allocate buffer\n");
-        exit(EXIT_FAILURE);
-    }
-
     /* Call fseek() if --start-offset is used. */
     if (offset != 0) {
         if (fseek(input, offset, SEEK_SET) < 0) {
-            fprintf(stderr, "failed to seek to offset %d: %s\n",
-                offset, strerror(errno));
-            /* Not a fatal error; just set offset to 0. */
-            offset = 0;
+            /* fseek() fails on pipes. We must manually consume and discard 
+             * 'offset' bytes to reach the correct starting position in the stream. */
+            size_t bytes_to_discard = (size_t)offset;
+            uint8_t discard_buf[4096];
+            
+            while (bytes_to_discard > 0) {
+                size_t grab = (bytes_to_discard < sizeof(discard_buf)) ? bytes_to_discard : sizeof(discard_buf);
+                size_t read_in = fread(discard_buf, 1, grab, input);
+                
+                if (read_in == 0) {
+                    break; /* EOF reached before we even hit the offset */
+                }
+                bytes_to_discard -= read_in;
+            }
         }
     }
+
 
     /* This forces printf to buffer 64KB before calling write(). */
     char stdout_buffer[CHUNK_SIZE];
@@ -596,8 +621,6 @@ int main(const int argc, char *argv[])
     }
 
     print_footer();
-
-    free(buffer);
     free(file_buf);
     return EXIT_SUCCESS;
 }
