@@ -42,15 +42,15 @@
 #define MID_DOT  0x00B7
 
 /* Static lookup tables for formatting hex and oct strings. */
-static const char hex_chars[] = "0123456789abcdef";
-static const char oct_chars[] = "01234567"; 
+static constexpr char hex_chars[] = "0123456789abcdef";
+static constexpr char oct_chars[] = "01234567";
 
 /* This is an arbitrary constant that sets the upper
  * limit for typed input in lieu of file arguments. */
 #define MAX_READ_BYTES 5096
 
 /* L1/L2 cache friendly buffer size. */
-#define CHUNK_SIZE 65536
+#define CHUNK_SIZE 8192
 
 typedef enum int8_t {
     F_HEX,
@@ -73,7 +73,7 @@ void show_help(void)
     printf("Usage: %s [OPTION] FILE\n\n\
 Options:\n\
   Output format options:\n\
-    -x, --hex\t\t hexidecimal format\n\
+    -x, --hex\t\t hexadecimal format\n\
     -o, --oct\t\t octal format\n\
     -d, --dec\t\t decimal format\n\
     -b, --bin\t\t binary format\n\
@@ -92,7 +92,7 @@ size_t get_file_size(const int fd)
 {
     struct stat buf;
     if (fstat(fd, &buf) == -1) {
-        fprintf(stderr, "fstat failed: %s\n",
+        fprintf(stderr, "stat failed: %s\n",
             strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -240,6 +240,7 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
     fwrite(line_buf, 1, pos, stdout);
 }
 
+
 void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
     char ascii_buf[512]; 
@@ -294,6 +295,7 @@ void write_output(const uint8_t *buffer, const int32_t offset, const size_t byte
     printf("%lc ", VERT_BAR);
     write_ascii(buffer, bytes_read);
 }
+
 
 void print_elide_line(const uint32_t n_lines)
 {
@@ -422,7 +424,9 @@ void print_footer()
 
 
 int64_t validate_numeric_arg(char* arg, const int32_t max_val, char* flag) {
-    const long int value = strtol(arg, nullptr, 10);
+    /* 'Special value' 0 for base is interpreted as decimal,
+     * or hex/oct if 0x or 0 prefix is present. */
+    const long int value = strtol(arg, nullptr, 0);
     if (value == 0) {
         fprintf(stderr, "Invalid number: %s\n", arg);
         exit(EXIT_FAILURE);
@@ -445,7 +449,7 @@ int main(const int argc, char *argv[])
     int opt;
     int32_t offset = 0;
 
-    /* Zeroed-out memory to compare for lines of just NULL bytes. */
+    /* Zeroed-out memory to compare for lines of just NUL bytes. */
     static const uint8_t zero_block[256] = {0};
     /* Counter of elided lines. */
     uint32_t n_elided = 0;
@@ -586,9 +590,8 @@ int main(const int argc, char *argv[])
         while (i < bytes_read) {
             const size_t chunk_len = (bytes_read - i < line_width) ? bytes_read - i : line_width;
 
-            const bool is_zero = (memcmp(&file_buf[i], zero_block, chunk_len) == 0);
-
             if (elide) {
+                const bool is_zero = (memcmp(&file_buf[i], zero_block, chunk_len) == 0);
                 if (is_zero) {
                     n_elided++;
                     if (n_elided == 1) {
