@@ -25,9 +25,7 @@ et al
 prints unambiguous representations of individual bytes to STDOUT, as well as a textual representation of bytes which
 fall into the range of ascii-printable characters.
 .PP
-It takes a FILE name as argument, or reads from STDIN if FILE is not provided. Read the
-.B BUGS
-section for the practical ramifications of FILE versus STDIN input.
+It takes a FILE name as argument, or reads from STDIN if FILE is not provided.
 .PP
 .B bdump
 divides its output into four logically separate 'cells' using the unicode box-drawing glyphs.
@@ -37,15 +35,14 @@ the file being dumped. Below the banner, the output is divided into three differ
 The
 .I offset well.
 This is a fixed-width cell that prints the beginning offset of each line in the format chosen by the
-user. By default, this format is hexidecimal. The bottom line of this cell will hold a value by itself, which is
-ultimately the size of the file dumped.
+user. By default, this format is hexadecimal.
 .PP
 The
 .I data dump
 cell. This is the main cell where the bytes are printed in the radix format chosen by the user. This format is
-unsigned hexidecimal by default, but can be changed to unsigned octal, unsigned decimal, or unsigned binary using
+unsigned hexadecimal by default, but can be changed to unsigned octal, unsigned decimal, or unsigned binary using
 command line flags. Note that changing the radix format will also change the format displayed in the offset well
-EXCEPT for binary output, in which case the offset well will display the offsets in hexidecimal.
+EXCEPT for binary output, in which case the offset well will display the offsets in hexadecimal.
 .PP
 The
 .I ascii dump
@@ -65,7 +62,7 @@ Print quick usage details to the screen.
 Print version information to the screen.
 .TP
 \fB-x or --hex\fP
-Format output in hexidecimal format. This is the default.
+Format output in hexadecimal format. This is the default.
 .TP
 \fB-o or --oct\fP
 Format output in octal format.
@@ -74,7 +71,7 @@ Format output in octal format.
 Format output in unsigned decimal format.
 .TP
 \fB-b or --bin\fP
-Format output as binary bit-strings. Note that the offset will be displayed in hexidecimal.
+Format output as binary bit-strings. Note that the offset will be displayed in hexadecimal.
 .TP
 \fB-n or --no-elide\fP
 By default, 2+ lines of just zero bytes (NULLs) are elided, and replaced with a message which states how many lines
@@ -92,14 +89,9 @@ Stop dumping after N bytes. Note that this and the previous option can be combin
 .TP
 .PP
 .SH BUGS
-While the
-.I --start-offset
-flag works just fine with explicitly-redirected input (ie: bdump < somefile) because the OS maps the STDIN file
-descriptor to the actual file being redirected, input that is piped into the command cannot be fseek()'ed, and therefore,
-if the input comes from a pipe, fseek will print an error, and the offset will otherwise be silently changed to '0', ie:
-the content will be dumped from the first byte.
 .PP
-It's pretty slow on large files. Need to implement a lookup table to construct the byte representations rather than using snprintf().
+Currently, only single-byte output is supported. Half-word and full-word output in both big and little
+endian format is in development.
 .SH AUTHOR
 Darren Kirby <darren@dragonbyte.ca>
 .SH "SEE ALSO"
