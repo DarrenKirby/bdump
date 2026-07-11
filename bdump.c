@@ -30,7 +30,7 @@
 #include <sys/ioctl.h>
 
 #define APPNAME "bdump"
-#define APPVERSION "0.10"
+#define APPVERSION "0.12.0"
 
 /* Constants for box-drawing, and others. */
 #define WELL_WIDTH 12
@@ -39,7 +39,7 @@
 #define DOWN_T   0x252C
 #define UP_T     0x2534
 #define CROSS    0x253C
-#define MID_DOT  0x00B7
+#define MID_DOT  0x00B
 
 /* Static lookup tables for formatting hex and oct strings. */
 static constexpr char hex_chars[] = "0123456789abcdef";
@@ -47,7 +47,7 @@ static constexpr char oct_chars[] = "01234567";
 
 /* This is an arbitrary constant that sets the upper
  * limit for typed input in lieu of file arguments. */
-#define MAX_READ_BYTES 5096
+#define MAX_READ_BYTES 4096
 
 /* L1/L2 cache friendly buffer size. */
 #define CHUNK_SIZE 8192
