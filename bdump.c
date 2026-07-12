@@ -56,6 +56,10 @@ static constexpr char oct_chars[] = "01234567";
  * limit for typed input in lieu of file arguments. */
 #define MAX_READ_BYTES 4096
 
+/* A stack buffer large enough for the widest format:
+ * (BIN: 9 chars * 255 bytes max = 2295). */
+#define MAX_LINE_BUF_LEN 4096
+
 /* L1/L2 cache friendly buffer size. */
 #define CHUNK_SIZE 8192
 
@@ -242,21 +246,144 @@ int write_well(const int32_t offset, const size_t bytes_read)
     }
 }
 
+size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
+{
+    size_t pos = 0;
+
+    if (output == O_BYTE) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            line_buf[pos++] = hex_chars[(buffer[i] >> 4) & 0x0F];
+            line_buf[pos++] = hex_chars[buffer[i] & 0x0F];
+            line_buf[pos++] = ' ';
+        }
+        return pos;
+    }
+
+    if (output == O_HALF_WORD) {
+        uint16_t half_word;
+
+        for (size_t i = 0; i < bytes_read; i+=2) {
+            if (little_endian) {
+                half_word = (buffer[i+1] << 8) | buffer[i];
+            } else {
+                half_word = (buffer[i] << 8) | buffer[i+1];
+            }
+
+            line_buf[pos++] = hex_chars[(half_word >> 12) & 0x0F];
+            line_buf[pos++] = hex_chars[(half_word >> 8) & 0x0F];
+            line_buf[pos++] = hex_chars[(half_word >> 4) & 0x0F];
+            line_buf[pos++] = hex_chars[half_word & 0x0F];
+            line_buf[pos++] = ' ';
+        }
+        return pos;
+    }
+
+    uint32_t word;
+    for (size_t i = 0; i < bytes_read; i+=4) {
+        if (little_endian) {
+            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
+        } else {
+            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
+        }
+
+        line_buf[pos++] = hex_chars[(word >> 28) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 24) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 20) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 16) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 12) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 8) & 0x0F];
+        line_buf[pos++] = hex_chars[(word >> 4) & 0x0F];
+        line_buf[pos++] = hex_chars[word & 0x0F];
+        line_buf[pos++] = ' ';
+    }
+    return pos;
+}
+
+//void write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {}
+
+size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
+    size_t pos = 0;
+
+    if (output == O_BYTE) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%4d ", (int8_t)buffer[i]);
+        }
+        return pos;
+    }
+
+    if (output == O_HALF_WORD) {
+        for (size_t i = 0; i < bytes_read; i+=2) {
+            uint16_t half_word;
+
+            if (little_endian) {
+                half_word = (buffer[i+1] << 8) | buffer[i];
+            } else {
+                half_word = (buffer[i] << 8) | buffer[i+1];
+            }
+            pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%6d ", (int16_t)half_word);
+        }
+        return pos;
+    }
+
+    uint32_t word;
+    for (size_t i = 0; i < bytes_read; i+=4) {
+        if (little_endian) {
+            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
+        } else {
+            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
+        }
+        pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%11d ", (int32_t)word);
+    }
+    return pos;
+}
+
+size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
+{
+    size_t pos = 0;
+
+    if (output == O_BYTE) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%3u ", buffer[i]);
+        }
+        return pos;
+    }
+
+    if (output == O_HALF_WORD) {
+        for (size_t i = 0; i < bytes_read; i+=2) {
+            uint16_t half_word;
+
+            if (little_endian) {
+                half_word = (buffer[i+1] << 8) | buffer[i];
+            } else {
+                half_word = (buffer[i] << 8) | buffer[i+1];
+            }
+            pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%5u ", half_word);
+        }
+        return pos;
+    }
+
+    uint32_t word;
+    for (size_t i = 0; i < bytes_read; i+=4) {
+        if (little_endian) {
+            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
+        } else {
+            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
+        }
+        pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%10u ", word);
+    }
+    return pos;
+}
+
 
 /* Write the binary dump section of output. */
 void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 {
-    /* A stack buffer large enough for the widest format (BIN: 9 chars * 255 bytes max = 2295). */
-    char line_buf[4096]; 
+    char line_buf[MAX_LINE_BUF_LEN];
     size_t pos = 0;
 
     switch (format) {
         case F_HEX: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                line_buf[pos++] = hex_chars[(buffer[i] >> 4) & 0x0F];
-                line_buf[pos++] = hex_chars[buffer[i] & 0x0F];
-                line_buf[pos++] = ' ';
-            }
+            pos = write_hex_dump(line_buf, buffer, bytes_read);
             break;
         }
         case F_OCT: {
@@ -270,15 +397,11 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
             break;
         }
         case F_UNSIGNED: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%3d ", buffer[i]);
-            }
+            pos = write_unsigned_dump(line_buf, buffer, bytes_read);
             break;
         }
         case F_SIGNED: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%4d ", (int8_t)buffer[i]);
-            }
+            pos = write_signed_dump(line_buf, buffer, bytes_read);
             break;
         }
         case F_BIN: {
@@ -290,32 +413,58 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
             break;
         }
         default:
-            return;
+            break;
     }
 
     /* Handle the padding for partial lines. */
     if (bytes_read < line_width) {
-        const size_t gap = line_width - bytes_read;
+        size_t gap = line_width - bytes_read;
         /* Fixme: needs to handle HW and word output,
          * and should probably be factored out to a function. */
-        int pad_chars;
+        int pad_chars = 0;
         switch (format) {
-            case F_HEX:
-                pad_chars = 3;
+            case F_HEX: {
+                if (output == O_BYTE) pad_chars = 3;
+                if (output == O_HALF_WORD) {
+                    pad_chars = 5;
+                    gap = gap / 2;
+                }
+                if (output == O_WORD) {
+                    pad_chars = 9;
+                    gap = gap / 4;
+                }
                 break;
+            }
             case F_BIN:
                 pad_chars = 9;
                 break;
             case F_SIGNED:
-                pad_chars = 5;
+                if (output == O_BYTE) pad_chars = 5;
+                if (output == O_HALF_WORD) {
+                    pad_chars = 7;
+                    gap = gap / 2;
+                }
+                if (output == O_WORD) {
+                    pad_chars = 12;
+                    gap = gap / 4;
+                }
+                break;
+            case F_UNSIGNED:
+                if (output == O_BYTE) pad_chars = 4;
+                if (output == O_HALF_WORD) {
+                    pad_chars = 6;
+                    gap = gap / 2;
+                }
+                if (output == O_WORD) {
+                    pad_chars = 11;
+                    gap = gap / 4;
+                }
                 break;
             default:
-                /* F_OCT and F_UNSIGNED. */
+                /* F_OCT  */
                 pad_chars = 4;
                 break;
         }
-        //const int pad_chars = (format == F_OCT || format == F_UNSIGNED) ? 4 : (format == F_BIN ? 9 : 3);
-        
         memset(&line_buf[pos], ' ', gap * pad_chars);
         pos += gap * pad_chars;
     }
@@ -526,7 +675,8 @@ int64_t validate_numeric_arg(char* arg, const int32_t max_val, char* flag) {
 }
 
 
-int main(const int argc, char *argv[]) {
+int main(const int argc, char *argv[])
+{
     setlocale(LC_ALL, "");
     int opt;
     int32_t offset = 0;
@@ -536,7 +686,7 @@ int main(const int argc, char *argv[]) {
     /* Counter of elided lines. */
     uint32_t n_elided = 0;
     /* Flag for whether to elide or not. */
-    bool elide = 1;
+    bool elide = true;
 
     const struct option longopts[] = {
         {"hex",           no_argument,       nullptr, 'x'},
@@ -590,7 +740,7 @@ int main(const int argc, char *argv[]) {
                 little_endian = false;
                 break;
             case 'n':
-                elide = 0;
+                elide = false;
                 break;
             case 's': {
                 offset = (int32_t)validate_numeric_arg(optarg, 0, "--start-offset");
@@ -615,9 +765,8 @@ int main(const int argc, char *argv[]) {
                 exit(EXIT_SUCCESS);
             case ':':
             case '?':
-                /* getopt_long prints own error message */
-                exit(EXIT_FAILURE);
             default:
+                /* getopt_long prints own error message. */
                 show_help();
                 exit(EXIT_FAILURE);
         }
@@ -672,11 +821,11 @@ int main(const int argc, char *argv[]) {
             uint8_t discard_buf[4096];
             
             while (bytes_to_discard > 0) {
-                size_t grab = (bytes_to_discard < sizeof(discard_buf)) ? bytes_to_discard : sizeof(discard_buf);
-                size_t read_in = fread(discard_buf, 1, grab, input);
+                const size_t grab = (bytes_to_discard < sizeof(discard_buf)) ? bytes_to_discard : sizeof(discard_buf);
+                const size_t read_in = fread(discard_buf, 1, grab, input);
                 
                 if (read_in == 0) {
-                    break; /* EOF reached before we even hit the offset */
+                    break; /* EOF reached before we even hit the offset. */
                 }
                 bytes_to_discard -= read_in;
             }
@@ -708,7 +857,7 @@ int main(const int argc, char *argv[]) {
             const size_t chunk_len = (bytes_read - i < line_width) ? bytes_read - i : line_width;
 
             if (elide) {
-                const bool is_zero = (memcmp(&file_buf[i], zero_block, chunk_len) == 0);
+                const bool is_zero = memcmp(&file_buf[i], zero_block, chunk_len) == 0;
                 if (is_zero) {
                     n_elided++;
                     if (n_elided == 1) {
