@@ -21,16 +21,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <string.h>
 #include <getopt.h>
 #include <locale.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
 #define APPNAME "bdump"
-#define APPVERSION "0.12.0"
+#define APPVERSION "1.0.0"
 
 /* Constants for box-drawing, and others. */
 #define WELL_WIDTH 12
@@ -39,11 +41,10 @@
 #define DOWN_T   0x252C
 #define UP_T     0x2534
 #define CROSS    0x253C
-#define MID_DOT  0x00B
 
 /* Determine machine endianess for default output. */
 #ifndef __BYTE_ORDER__
-bool little_endian = true
+bool little_endian = true;
 #else
 bool little_endian = (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 #endif
@@ -53,14 +54,18 @@ static constexpr char hex_chars[] = "0123456789abcdef";
 static constexpr char oct_chars[] = "01234567";
 
 /* This is an arbitrary constant that sets the upper
- * limit for typed input in lieu of file arguments. */
-#define MAX_READ_BYTES 4096
+ * read limit for piped input. */
+#define MAX_READ_BYTES SIZE_MAX
 
-/* A stack buffer large enough for the widest format:
- * (BIN: 9 chars * 255 bytes max = 2295). */
-#define MAX_LINE_BUF_LEN 4096
+/* A buffer large enough for the widest format:
+ * (BIN: 9 chars * 255 bytes max = 2295 + 32B padding). */
+#define MAX_LINE_BUF_LEN ((255 * 9) + 32)
 
-/* L1/L2 cache friendly buffer size. */
+/* 255 * 2 = 510 bytes + 5 more:
+ * (space + 3-byte UTF-8 vbar + newline. */
+#define ASCII_BUF_SIZE 515
+
+/* L1/L2 cache friendly read-buffer size. */
 #define CHUNK_SIZE 8192
 
 typedef enum : int8_t {
@@ -86,25 +91,33 @@ uint8_t line_width = 16;
 /* Default is to read all bytes. This value will be filled by
  * call to stat() if --read-size is not used. */
 size_t read_size = 0;
+/* This does not change per run, so cache it. */
+int32_t bin_width;
 
 
 void show_help(void)
 {
-    printf("Usage: %s [OPTION] FILE\n\n\
+    printf("Usage: %s [OPTION(s)] [FILE]\n\n\
 Options:\n\
-  Output format options:\n\
-    -x, --hex\t\t hexadecimal format\n\
-    -o, --oct\t\t octal format\n\
-    -b, --bin\t\t binary format\n\
-    -S, --signed\t\t signed decimal format\n\
-    -d, --unsigned\t\t unsigned decimal format\n\
-  General options:\n\
-    -n, --no-elide\t don't elide lines of NULL bytes\n\
-    -l, --line-width=n\t print n bytes per line\n\
-    -s, --start-offset=n start output at offset n\n\
-    -r, --read-size=n\t read only n bytes\n\
-    -h, --help\t\t display this help\n\
-    -V, --version\t display version information\n\n\
+    Output radix options:\n\
+        -x, --hex\t\t hexadecimal\n\
+        -o, --oct\t\t octal\n\
+        -b, --bin\t\t binary\n\
+        -S, --signed\t\t signed decimal\n\
+        -d, --unsigned\t\t unsigned decimal\n\n\
+    Output byte grouping options:\n\
+        -H, --half-word\t\t output 2 byte groupings\n\
+        -W, --word\t\t output 4 byte groupings\n\n\
+    Output byte-order options:\n\
+        -L, --little-endian\t output in little-endian\n\
+        -B, --big-endian\t output in big-endian\n\n\
+    General options:\n\
+        -n, --no-elide\t\t don't elide lines of NULL bytes\n\
+        -l, --line-width=n\t print n bytes per line\n\
+        -s, --start-offset=n\t start output at offset n\n\
+        -r, --read-size=n\t read only n bytes\n\
+        -h, --help\t\t display this help\n\
+        -V, --version\t\t display version information\n\n\
 Report bugs to <darren@dragonbyte.ca>\n", APPNAME);
 }
 
@@ -125,12 +138,13 @@ size_t get_file_size(const int fd)
     return buf.st_size;
 }
 
-
+/* The value returned by this function only really
+ * affects the length of the horizontal lines. */
 int32_t get_term_width(void)
 {
     /* Check if stdout is redirected to a file or a pipe. */
     if (!isatty(STDOUT_FILENO)) {
-        /* This is width of default line-width and hex output. */
+        /* This is width of default line-width with hex output. */
         return 82;
     }
 
@@ -213,38 +227,88 @@ void byte_to_binary_string(const uint8_t byte, char *str)
 }
 
 
-/* Write the offset well section of output. */
-int write_well(const int32_t offset, const size_t bytes_read)
+/* Write the offset well section of output. Returns a boolean
+ * indicating if we have printed the last data line. */
+bool write_well(const uint64_t offset, const size_t bytes_read)
 {
     switch (format) {
         case F_OCT: {
             if (bytes_read == 0) {
-                printf(" 0o%08o %lc", offset, VERT_BAR);
-                return 1;
+                printf(" 0o%08" PRIo64 " %lc", offset, VERT_BAR);
+                return true;
             }
-            printf(" 0o%08o %lc ", offset, VERT_BAR);
-            return 0;
+            printf(" 0o%08" PRIo64 " %lc ", offset, VERT_BAR);
+            return false;
         }
         case F_UNSIGNED:
         case F_SIGNED:
             {
             if (bytes_read == 0) {
-                printf(" 0d%08d %lc", offset, VERT_BAR);
-                return 1;
+                printf(" 0d%08" PRIu64 " %lc", offset, VERT_BAR);
+                return true;
             }
-            printf(" 0d%08d %lc ", offset, VERT_BAR);
-            return 0;
+            printf(" 0d%08" PRIu64 " %lc ", offset, VERT_BAR);
+            return false;
         }
         default: {
             if (bytes_read == 0) {
-                printf(" 0x%08X %lc", offset, VERT_BAR);
-                return 1;
+                printf(" 0x%08" PRIx64 " %lc", offset, VERT_BAR);
+                return true;
             }
-            printf(" 0x%08X %lc ", offset, VERT_BAR);
-            return 0;
+            printf(" 0x%08" PRIx64 " %lc ", offset, VERT_BAR);
+            return false;
         }
     }
 }
+
+
+/* Build a half-word from 2 bytes. */
+static uint16_t parse_half_word(const uint8_t a, const uint8_t b)
+{
+    uint16_t half_word;
+    if (little_endian) {
+        half_word = (uint16_t)b << 8 | (uint16_t)a;
+    } else {
+        half_word = (uint16_t)a << 8 | (uint16_t)b;
+    }
+    return half_word;
+}
+
+
+/* Zero-pad incomplete half-word groupings. */
+static uint16_t load_half_word(const uint8_t *buf, const size_t remaining)
+{
+    const uint8_t a = remaining > 0 ? buf[0] : 0;
+    const uint8_t b = remaining > 1 ? buf[1] : 0;
+
+    return parse_half_word(a, b);
+}
+
+
+/* Build a word from 4 bytes. */
+static uint32_t parse_word(const uint8_t a, const uint8_t b, const uint8_t c, const uint8_t d)
+{
+    uint32_t word;
+    if (little_endian) {
+        word = (uint32_t)d << 24 | (uint32_t)c << 16 | (uint32_t)b << 8 | (uint32_t)a;
+    } else {
+        word = (uint32_t)a << 24 | (uint32_t)b << 16 | (uint32_t)c << 8 | (uint32_t)d;
+    }
+    return word;
+}
+
+
+/* Zero-pad incomplete word groupings. */
+static uint32_t load_word(const uint8_t *buf, size_t remaining)
+{
+    uint8_t a = remaining > 0 ? buf[0] : 0;
+    uint8_t b = remaining > 1 ? buf[1] : 0;
+    uint8_t c = remaining > 2 ? buf[2] : 0;
+    uint8_t d = remaining > 3 ? buf[3] : 0;
+
+    return parse_word(a, b, c, d);
+}
+
 
 size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
 {
@@ -260,14 +324,8 @@ size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_
     }
 
     if (output == O_HALF_WORD) {
-        uint16_t half_word;
-
         for (size_t i = 0; i < bytes_read; i+=2) {
-            if (little_endian) {
-                half_word = (buffer[i+1] << 8) | buffer[i];
-            } else {
-                half_word = (buffer[i] << 8) | buffer[i+1];
-            }
+            const uint16_t half_word = load_half_word(&buffer[i], bytes_read - i);
 
             line_buf[pos++] = hex_chars[(half_word >> 12) & 0x0F];
             line_buf[pos++] = hex_chars[(half_word >> 8) & 0x0F];
@@ -278,13 +336,9 @@ size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_
         return pos;
     }
 
-    uint32_t word;
+
     for (size_t i = 0; i < bytes_read; i+=4) {
-        if (little_endian) {
-            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
-        } else {
-            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
-        }
+        const uint32_t word = load_word(&buffer[i], bytes_read - i);
 
         line_buf[pos++] = hex_chars[(word >> 28) & 0x0F];
         line_buf[pos++] = hex_chars[(word >> 24) & 0x0F];
@@ -299,7 +353,57 @@ size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_
     return pos;
 }
 
-//void write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {}
+
+size_t write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
+    size_t pos = 0;
+
+    if (output == O_BYTE) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            line_buf[pos++] = oct_chars[(buffer[i] >> 6) & 0x07];
+            line_buf[pos++] = oct_chars[(buffer[i] >> 3) & 0x07];
+            line_buf[pos++] = oct_chars[buffer[i] & 0x07];
+
+            line_buf[pos++] = ' ';
+        }
+        return pos;
+    }
+
+    if (output == O_HALF_WORD) {
+        for (size_t i = 0; i < bytes_read; i+=2) {
+            const uint16_t half_word = load_half_word(&buffer[i], bytes_read - i);
+
+            line_buf[pos++] = oct_chars[(half_word >> 15) & 0x07];
+            line_buf[pos++] = oct_chars[(half_word >> 12) & 0x07];
+            line_buf[pos++] = oct_chars[(half_word >> 9) & 0x07];
+            line_buf[pos++] = oct_chars[(half_word >> 6) & 0x07];
+            line_buf[pos++] = oct_chars[(half_word >> 3) & 0x07];
+            line_buf[pos++] = oct_chars[half_word & 0x07];
+
+            line_buf[pos++] = ' ';
+        }
+        return pos;
+    }
+
+    for (size_t i = 0; i < bytes_read; i+=4) {
+        const uint32_t word = load_word(&buffer[i], bytes_read - i);
+
+        line_buf[pos++] = oct_chars[(word >> 30) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 27) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 24) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 21) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 18) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 15) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 12) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 9) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 6) & 0x07];
+        line_buf[pos++] = oct_chars[(word >> 3) & 0x07];
+        line_buf[pos++] = oct_chars[word & 0x07];
+
+        line_buf[pos++] = ' ';
+    }
+    return pos;
+}
+
 
 size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
     size_t pos = 0;
@@ -313,29 +417,19 @@ size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t byt
 
     if (output == O_HALF_WORD) {
         for (size_t i = 0; i < bytes_read; i+=2) {
-            uint16_t half_word;
-
-            if (little_endian) {
-                half_word = (buffer[i+1] << 8) | buffer[i];
-            } else {
-                half_word = (buffer[i] << 8) | buffer[i+1];
-            }
+            const uint16_t half_word = load_half_word(&buffer[i], bytes_read - i);
             pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%6d ", (int16_t)half_word);
         }
         return pos;
     }
 
-    uint32_t word;
     for (size_t i = 0; i < bytes_read; i+=4) {
-        if (little_endian) {
-            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
-        } else {
-            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
-        }
+        const uint32_t word = load_word(&buffer[i], bytes_read - i);
         pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%11d ", (int32_t)word);
     }
     return pos;
 }
+
 
 size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
 {
@@ -350,28 +444,69 @@ size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t b
 
     if (output == O_HALF_WORD) {
         for (size_t i = 0; i < bytes_read; i+=2) {
-            uint16_t half_word;
-
-            if (little_endian) {
-                half_word = (buffer[i+1] << 8) | buffer[i];
-            } else {
-                half_word = (buffer[i] << 8) | buffer[i+1];
-            }
+            const uint16_t half_word = load_half_word(&buffer[i], bytes_read - i);
             pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%5u ", half_word);
         }
         return pos;
     }
 
-    uint32_t word;
     for (size_t i = 0; i < bytes_read; i+=4) {
-        if (little_endian) {
-            word = (buffer[i+3] << 24) | (buffer[i+2] << 16) | (buffer[i+1] << 8) | buffer[i];
-        } else {
-            word = (buffer[i] << 24) | (buffer[i+1] << 16) | (buffer[i+2] << 8) | buffer[i+3];
-        }
+        const uint32_t word = load_word(&buffer[i], bytes_read - i);
         pos += snprintf(&line_buf[pos], MAX_LINE_BUF_LEN - pos, "%10u ", word);
     }
     return pos;
+}
+
+
+void calculate_gap_and_padding(size_t *gap, size_t *pad_chars)
+{
+    switch (output) {
+        case O_BYTE: {
+            switch (format) {
+                case F_HEX: *pad_chars = 3; return;
+                case F_BIN: *pad_chars = 9; return;
+                case F_SIGNED: *pad_chars = 5; return;
+                default: *pad_chars = 4; return;
+            }
+        }
+        case O_HALF_WORD: {
+            switch (format) {
+                case F_HEX: {
+                    *pad_chars = 5;
+                    *gap = *gap / 2;
+                    return;
+                }
+                case F_UNSIGNED: {
+                    *pad_chars = 6;
+                    *gap = *gap / 2;
+                    return;
+                }
+                default: {
+                    *pad_chars = 7;
+                    *gap = *gap / 2;
+                    return;
+                }
+            }
+        }
+        case O_WORD: {
+            switch (format) {
+                case F_HEX: {
+                    *pad_chars = 9;
+                    *gap = *gap / 4;
+                    return;
+                }
+                case F_UNSIGNED: {
+                    *pad_chars = 11;
+                    *gap = *gap / 4;
+                    return;
+                }
+                default: {
+                    *pad_chars = 12;
+                    *gap = *gap / 4;
+                }
+            }
+        }
+    }
 }
 
 
@@ -387,13 +522,7 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
             break;
         }
         case F_OCT: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                line_buf[pos++] = oct_chars[(buffer[i] >> 6) & 0x07];
-                line_buf[pos++] = oct_chars[(buffer[i] >> 3) & 0x07];
-                line_buf[pos++] = oct_chars[buffer[i] & 0x07];
-    
-                line_buf[pos++] = ' ';
-            }
+            pos = write_oct_dump(line_buf, buffer, bytes_read);
             break;
         }
         case F_UNSIGNED: {
@@ -419,52 +548,10 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
     /* Handle the padding for partial lines. */
     if (bytes_read < line_width) {
         size_t gap = line_width - bytes_read;
-        /* Fixme: needs to handle HW and word output,
-         * and should probably be factored out to a function. */
-        int pad_chars = 0;
-        switch (format) {
-            case F_HEX: {
-                if (output == O_BYTE) pad_chars = 3;
-                if (output == O_HALF_WORD) {
-                    pad_chars = 5;
-                    gap = gap / 2;
-                }
-                if (output == O_WORD) {
-                    pad_chars = 9;
-                    gap = gap / 4;
-                }
-                break;
-            }
-            case F_BIN:
-                pad_chars = 9;
-                break;
-            case F_SIGNED:
-                if (output == O_BYTE) pad_chars = 5;
-                if (output == O_HALF_WORD) {
-                    pad_chars = 7;
-                    gap = gap / 2;
-                }
-                if (output == O_WORD) {
-                    pad_chars = 12;
-                    gap = gap / 4;
-                }
-                break;
-            case F_UNSIGNED:
-                if (output == O_BYTE) pad_chars = 4;
-                if (output == O_HALF_WORD) {
-                    pad_chars = 6;
-                    gap = gap / 2;
-                }
-                if (output == O_WORD) {
-                    pad_chars = 11;
-                    gap = gap / 4;
-                }
-                break;
-            default:
-                /* F_OCT  */
-                pad_chars = 4;
-                break;
-        }
+        size_t pad_chars = 0;
+
+        calculate_gap_and_padding(&gap, &pad_chars);
+
         memset(&line_buf[pos], ' ', gap * pad_chars);
         pos += gap * pad_chars;
     }
@@ -475,7 +562,7 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 
 void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
-    char ascii_buf[512]; 
+    char ascii_buf[ASCII_BUF_SIZE];
     size_t pos = 0;
 
     for (size_t i = 0; i < bytes_read; i++) {
@@ -507,16 +594,15 @@ void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 
 
 /* Write the output. */
-void write_output(const uint8_t *buffer, const int32_t offset, const size_t bytes_read)
+void write_output(const uint8_t *buffer, const uint64_t offset, const size_t bytes_read)
 {
-    if (write_well(offset, bytes_read) == 1) {
+    if (write_well(offset, bytes_read)) {
         /* Write the vertical bars for the last line. */
-        const int32_t bw = get_bin_width();
-        for (int32_t i = 0; i < bw; i++) {
+        for (int i = 0; i < bin_width; i++) {
             printf(" ");
         }
         printf("%lc", VERT_BAR);
-        for (int32_t i = 0; i < line_width; i++) {
+        for (size_t i = 0; i < line_width; i++) {
             printf(" ");
         }
         printf("  ");
@@ -531,8 +617,6 @@ void write_output(const uint8_t *buffer, const int32_t offset, const size_t byte
 
 void print_elide_line(const uint32_t n_lines)
 {
-    int32_t bin_width = get_bin_width();
-
     /* We need the length of msg to calculate padding,
      * so format the message into a temporary buffer. */
     char msg[128];
@@ -569,12 +653,10 @@ void print_elide_line(const uint32_t n_lines)
 
 
 /* Print the Unicode box-drawing chars to the screen. */
-void print_banner(char* filename)
+void print_banner(const char* filename)
 {
     /* Get the terminal width. */
     const int32_t term_width = get_term_width();
-    /* Get the binary section width. */
-    const int32_t bin_width = get_bin_width();
     /* Get the ascii string section width. */
     const int32_t ascii_width = line_width + 2;
     /* Calculate how many more columns left in the row. */
@@ -582,21 +664,21 @@ void print_banner(char* filename)
 
     /* First line...
      * Print the horizontal line over the well. */
-    for (int32_t i = 0; i < WELL_WIDTH; i++) {
+    for (size_t i = 0; i < WELL_WIDTH; i++) {
         printf("%lc", HORT_BAR);
     }
     /* Print the '┬' */
     printf("%lc", DOWN_T);
     /* Complete the horizontal line to end of terminal. */
     const int rest = term_width - WELL_WIDTH - 1;
-    for (int32_t i = 0; i < rest; i++) {
+    for (int i = 0; i < rest; i++) {
         printf("%lc", HORT_BAR);
     }
     printf("\n");
 
     /* Second line....
      * print spaces over the well. */
-    for (int32_t i = 0; i < WELL_WIDTH; i++) {
+    for (size_t i = 0; i < WELL_WIDTH; i++) {
         printf("%s", " ");
     }
     /* Print the v-bar */
@@ -606,25 +688,25 @@ void print_banner(char* filename)
 
     /* Third line...
     *Print the horizontal line over the well. */
-    for (int32_t i = 0; i < WELL_WIDTH; i++) {
+    for (size_t i = 0; i < WELL_WIDTH; i++) {
         printf("%lc", HORT_BAR);
     }
     /* Print the '┼' */
     printf("%lc", CROSS);
     /* Print the horizontal bar over the binary content. */
-    for (int32_t i = 0; i < bin_width; i++) {
+    for (int i = 0; i < bin_width; i++) {
         printf("%lc", HORT_BAR);
     }
     /* Print the first '┬' */
     printf("%lc", DOWN_T);
     /* Print the horizontal bar over the ascii content. */
-    for (int32_t i = 0; i < ascii_width; i++) {
+    for (int i = 0; i < ascii_width; i++) {
         printf("%lc", HORT_BAR);
     }
     /* Print the final '┬' */
     printf("%lc", DOWN_T);
     /* Complete the horizontal line to end of terminal. */
-    for (int32_t i = 0; i < cols_left; i++) {
+    for (int i = 0; i < cols_left; i++) {
         printf("%lc", HORT_BAR);
     }
 
@@ -632,41 +714,62 @@ void print_banner(char* filename)
 }
 
 
-void print_footer()
+void print_footer(void)
 {
     for (int i = 0; i < WELL_WIDTH; i++) {
         printf("%lc", HORT_BAR);
     }
     printf("%lc", UP_T);
-    const int32_t bw = get_bin_width();
-    for (int i = 0; i < bw; i++) {
+    for (int i = 0; i < bin_width; i++) {
         printf("%lc", HORT_BAR);
     }
     printf("%lc", UP_T);
     const int32_t ascii_width = line_width + 2;
-    for (int32_t i = 0; i < ascii_width; i++) {
+    for (int i = 0; i < ascii_width; i++) {
         printf("%lc", HORT_BAR);
     }
     printf("%lc", UP_T);
-    const int32_t rest = get_term_width() - WELL_WIDTH - bw - ascii_width - 3;
+    const int32_t rest = get_term_width() - WELL_WIDTH - bin_width - ascii_width - 3;
     for (int i = 0; i < rest; i++) {
         printf("%lc", HORT_BAR);
     }
 }
 
 
-int64_t validate_numeric_arg(char* arg, const int32_t max_val, char* flag) {
+int64_t validate_numeric_arg(const char* arg, const int32_t max_val, const char* flag)
+{
     /* 'Special value' 0 for base is interpreted as decimal,
      * or hex/oct if 0x or 0 prefix is present. */
-    const long int value = strtol(arg, nullptr, 0);
-    if (value == 0) {
-        fprintf(stderr, "Invalid number: %s\n", arg);
+    char* p;
+    errno = 0;
+    const long int value = strtol(arg, &p, 0);
+
+    if (errno == ERANGE) {
+        if (value == LONG_MAX) {
+            fprintf(stderr, "Error: Overflow occurred.\n");
+            exit(EXIT_FAILURE);
+        }
+        if (value == LONG_MIN) {
+            fprintf(stderr, "Error: Underflow occurred.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (p == arg) {
+        fprintf(stderr, "Error: No digits were found.\n");
         exit(EXIT_FAILURE);
     }
+
+    if (*p != '\0') {
+        fprintf(stderr, "Partial conversion: Number is %ld, but trailing junk found: '%s'\n", value, p);
+        exit(EXIT_FAILURE);
+    }
+
     if (value < 0 ) {
         fprintf(stderr, "Negative values not valid for %s\n", flag);
         exit(EXIT_FAILURE);
     }
+
     if (max_val != 0 && value > max_val) {
         fprintf(stderr, "Argument too large for %s\n", flag);
         exit(EXIT_FAILURE);
@@ -679,7 +782,7 @@ int main(const int argc, char *argv[])
 {
     setlocale(LC_ALL, "");
     int opt;
-    int32_t offset = 0;
+    uint64_t offset = 0;
 
     /* Zeroed-out memory to compare for lines of just NUL bytes. */
     static const uint8_t zero_block[256] = {0};
@@ -787,13 +890,16 @@ int main(const int argc, char *argv[])
         line_width = (line_width + 2) & ~3;
     }
 
+    /* Calculate and cache bin width. */
+    bin_width = get_bin_width();
+
     /* Open arg/stdin for reading. */
     FILE* input;
-    char* filename;
+    const char* filename;
     /* Ensure we only call fopen() on passed args,
      * and not on shell I/O redirects. */
     if (optind < argc) {
-        input = fopen(argv[optind], "r");
+        input = fopen(argv[optind], "rb");
         if (!input) {
             fprintf(stderr, "failed to open %s: %s\n",
                 argv[optind], strerror(errno));
@@ -814,11 +920,11 @@ int main(const int argc, char *argv[])
 
     /* Call fseek() if --start-offset is used. */
     if (offset != 0) {
-        if (fseek(input, offset, SEEK_SET) < 0) {
+        if (fseeko(input, (off_t)offset, SEEK_SET) < 0) {
             /* fseek() fails on pipes. We must manually consume and discard 
              * 'offset' bytes to reach the correct starting position in the stream. */
-            size_t bytes_to_discard = (size_t)offset;
-            uint8_t discard_buf[4096];
+            size_t bytes_to_discard = offset;
+            uint8_t discard_buf[CHUNK_SIZE];
             
             while (bytes_to_discard > 0) {
                 const size_t grab = (bytes_to_discard < sizeof(discard_buf)) ? bytes_to_discard : sizeof(discard_buf);
@@ -833,16 +939,11 @@ int main(const int argc, char *argv[])
     }
 
 
-    /* This forces printf to buffer 64KB before calling write(). */
+    /* This forces printf to buffer CHUNK_SIZE before calling write(). */
     char stdout_buffer[CHUNK_SIZE];
     setvbuf(stdout, stdout_buffer, _IOFBF, sizeof(stdout_buffer));
 
-
-    uint8_t *file_buf = malloc(CHUNK_SIZE);
-    if (!file_buf) {
-        fprintf(stderr, "failed to allocate buffer\n");
-        exit(EXIT_FAILURE);
-    }
+    uint8_t file_buf[CHUNK_SIZE];
 
     while (read_size > 0) {
         /* Determine how much to read into the big block. */
@@ -879,7 +980,7 @@ int main(const int argc, char *argv[])
                 write_output(&file_buf[i], offset, chunk_len);
             }
 
-            offset += (int32_t)chunk_len;
+            offset += chunk_len;
             i += chunk_len;
         }
         read_size -= bytes_read;
@@ -890,6 +991,6 @@ int main(const int argc, char *argv[])
     }
 
     print_footer();
-    free(file_buf);
+    fclose(input);
     return EXIT_SUCCESS;
 }
