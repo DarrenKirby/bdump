@@ -1,4 +1,4 @@
-.TH BDUMP 1 "June 2026" "User Manuals"
+.TH BDUMP 1 "July 2026" "User Manuals"
 
 .SH NAME
 bdump \- rizzed up remake of
@@ -10,7 +10,7 @@ bdump \- rizzed up remake of
 et al
 
 .SH SYNOPSIS
-.B foo [-xodbnhV] [-s
+.B bdump [-xodSHWBLbnsrlhV] [-s
 .I n_bytes
 .B ] [-r
 .I n_bytes
@@ -22,8 +22,9 @@ et al
 
 .SH DESCRIPTION
 .B bdump
-prints unambiguous representations of individual bytes to STDOUT, as well as a textual representation of bytes which
-fall into the range of ascii-printable characters.
+prints unambiguous representations of individual bytes to STDOUT, or half-word and full-word (2 and 4 byte) groupings
+given the appropriate options. It also prints a textual representation of bytes which fall into the range of
+ascii-printable characters.
 .PP
 It takes a FILE name as argument, or reads from STDIN if FILE is not provided.
 .PP
@@ -40,14 +41,15 @@ user. By default, this format is hexadecimal.
 The
 .I data dump
 cell. This is the main cell where the bytes are printed in the radix format chosen by the user. This format is
-unsigned hexadecimal by default, but can be changed to unsigned octal, unsigned decimal, or unsigned binary using
+unsigned hexadecimal by default, but can be changed to unsigned octal, unsigned decimal, signed decimal, or unsigned
+binary using
 command line flags. Note that changing the radix format will also change the format displayed in the offset well
 EXCEPT for binary output, in which case the offset well will display the offsets in hexadecimal.
 .PP
 The
 .I ascii dump
 cell prints bytes which fall within the range of ascii-printable characters as those characters, else represents the
-non-printable bytes as Unicode glyph \\x00B7 aka the 'middle dot'.
+non-printable bytes as Unicode glyph \\x00B7 aka the middle dot.
 .PP
 The number of bytes written per line can be set using the
 .I --line-width
@@ -67,11 +69,28 @@ Format output in hexadecimal format. This is the default.
 \fB-o or --oct\fP
 Format output in octal format.
 .TP
-\fB-d or --dec\fP
+\fB-d or --unsigned\fP
 Format output in unsigned decimal format.
 .TP
+\fB-S or --signed\fP
+Format output in signed decimal format.
+.TP
 \fB-b or --bin\fP
-Format output as binary bit-strings. Note that the offset will be displayed in hexadecimal.
+Format output as binary bit-strings. Note that the offset will be displayed in hexadecimal, and that bitstring output
+can only be grouped as single bytes. I'm not of the opinion that this option is in any way practically useful, but it may
+be interesting to those trying to teach themselves to read binary.
+.TP
+\fB-H or --half-word\fP
+Combine 2 bytes into half-word groupings.
+.TP
+\fB-W or --word\fP
+Combine 4 bytes into full-word groupings.
+.TP
+\fB-L or --little-endian\fP
+.TP
+\fB-B or --big-endian\fP
+Display half and full-word groupings in either little-endian or big-endian byte order. The default if neither of these
+options is specified is to display using the byte order of the underlying machine.
 .TP
 \fB-n or --no-elide\fP
 By default, 2+ lines of just zero bytes (NULLs) are elided, and replaced with a message which states how many lines
@@ -90,8 +109,13 @@ Stop dumping after N bytes. Note that this and the previous option can be combin
 .PP
 .SH BUGS
 .PP
-Currently, only single-byte output is supported. Half-word and full-word output in both big and little
-endian format is in development.
+The width of the offset well is fixed at 8 zero-padded chars no matter which radix is used to display it. This is not
+really a practical problem, but keep in mind that the file-size limits for each of hex, dec, and oct is ~4GB, ~95MB, and
+~16MB respectively. When dumping files larger than this the columns will become unaligned to accommodate the wider offset
+display.
+.PP
+I probably can't be arsed to calculate the necessary offset well width based on file size dynamically, but I could add
+a char or two to the fixed-width if enough people complain about it.
 .SH AUTHOR
 Darren Kirby <darren@dragonbyte.ca>
 .SH "SEE ALSO"
