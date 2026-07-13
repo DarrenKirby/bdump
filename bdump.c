@@ -41,6 +41,7 @@
 #define DOWN_T   0x252C
 #define UP_T     0x2534
 #define CROSS    0x253C
+#define MID_DOT  0x00B7
 
 /* Determine machine endianess for default output. */
 #ifndef __BYTE_ORDER__
@@ -162,56 +163,54 @@ int32_t get_term_width(void)
  * format and line_width. */
 int32_t get_bin_width(void)
 {
+    int n_groups;
     switch (output) {
-        /* Half word. */
-        case O_HALF_WORD: {
-            const int n_groups = line_width / 2;
-            switch (format) {
-                case F_UNSIGNED:
-                    /* DEC: 5 chars + 1 space for each group + 1 space left side. */
-                    return n_groups * 6 + 1;
-                case F_OCT:
-                case F_SIGNED:
-                    /* Signed DEC and OCT: 6 chars + 1 space for each group + 1 space on left side. */
-                    return n_groups * 7 + 1;
-                default:
-                    /* HEX: 4 chars + 1 space for each group + 1 space on left side. */
-                    return n_groups * 5 + 1;
-            }
+    /* Half word. */
+    case O_HALF_WORD:
+        n_groups = line_width / 2;
+        switch (format) {
+        case F_UNSIGNED:
+            /* DEC: 5 chars + 1 space for each group + 1 space left side. */
+            return n_groups * 6 + 1;
+        case F_OCT:
+        case F_SIGNED:
+            /* Signed DEC and OCT: 6 chars + 1 space for each group + 1 space on left side. */
+            return n_groups * 7 + 1;
+        default:
+            /* HEX: 4 chars + 1 space for each group + 1 space on left side. */
+            return n_groups * 5 + 1;
         }
-        /* Full word. */
-        case O_WORD: {
-            int n_groups = line_width / 4;
-            switch (format) {
-                case F_UNSIGNED:
-                    /* DEC: 10 chars + 1 space for each group + 1 space on left side. */
-                    return n_groups * 11 + 1;
-                case F_SIGNED:
-                case F_OCT:
-                    /* Signed DEC and OCT: 11 chars + 1 space for each group + 1 space on left side. */
-                    return n_groups * 12 + 1;
-                default:
-                    /* HEX: 8 chars + 1 space for each + 1 space on left side. */
-                    return n_groups * 9 + 1;
-            }
-        }
-        /* Single byte. */
-        default: {
-            switch (format) {
-                case F_UNSIGNED:
-                case F_OCT:
-                    /* OCT and DEC: 3 chars + 1 space for each + 1 space on left side. */
-                    return line_width * 4 + 1;
-                case F_SIGNED:
-                    /* Signed DEC: 4 chars + 1 space for each, plus 1 space on left side. */
-                    return line_width * 5 + 1;
-                case F_BIN:
-                    /* BIN: 8 chars + 1 space for each + 1 space on left side. */
-                    return line_width * 9 + 1;
-                default:
-                    /* HEX: 2 chars + 1 space for each + 1 space on left side. */
-                    return line_width * 3 + 1;
-            }
+    /* Full word. */
+    case O_WORD:
+        n_groups = line_width / 4;
+        switch (format) {
+        case F_UNSIGNED:
+            /* DEC: 10 chars + 1 space for each group + 1 space on left side. */
+            return n_groups * 11 + 1;
+        case F_SIGNED:
+        case F_OCT:
+            /* Signed DEC and OCT: 11 chars + 1 space for each group + 1 space on left side. */
+            return n_groups * 12 + 1;
+        default:
+            /* HEX: 8 chars + 1 space for each + 1 space on left side. */
+            return n_groups * 9 + 1;
+    }
+    /* Single byte. */
+    default:
+        switch (format) {
+        case F_UNSIGNED:
+        case F_OCT:
+            /* OCT and DEC: 3 chars + 1 space for each + 1 space on left side. */
+            return line_width * 4 + 1;
+        case F_SIGNED:
+            /* Signed DEC: 4 chars + 1 space for each, plus 1 space on left side. */
+            return line_width * 5 + 1;
+        case F_BIN:
+            /* BIN: 8 chars + 1 space for each + 1 space on left side. */
+            return line_width * 9 + 1;
+        default:
+            /* HEX: 2 chars + 1 space for each + 1 space on left side. */
+            return line_width * 3 + 1;
         }
     }
 }
@@ -232,32 +231,28 @@ void byte_to_binary_string(const uint8_t byte, char *str)
 bool write_well(const uint64_t offset, const size_t bytes_read)
 {
     switch (format) {
-        case F_OCT: {
-            if (bytes_read == 0) {
-                printf(" 0o%08" PRIo64 " %lc", offset, VERT_BAR);
-                return true;
-            }
-            printf(" 0o%08" PRIo64 " %lc ", offset, VERT_BAR);
-            return false;
+    case F_OCT:
+        if (bytes_read == 0) {
+            printf(" 0o%08" PRIo64 " %lc", offset, VERT_BAR);
+            return true;
         }
-        case F_UNSIGNED:
-        case F_SIGNED:
-            {
-            if (bytes_read == 0) {
-                printf(" 0d%08" PRIu64 " %lc", offset, VERT_BAR);
-                return true;
-            }
-            printf(" 0d%08" PRIu64 " %lc ", offset, VERT_BAR);
-            return false;
+        printf(" 0o%08" PRIo64 " %lc ", offset, VERT_BAR);
+        return false;
+    case F_UNSIGNED:
+    case F_SIGNED:
+        if (bytes_read == 0) {
+            printf(" 0d%08" PRIu64 " %lc", offset, VERT_BAR);
+            return true;
         }
-        default: {
-            if (bytes_read == 0) {
-                printf(" 0x%08" PRIx64 " %lc", offset, VERT_BAR);
-                return true;
-            }
-            printf(" 0x%08" PRIx64 " %lc ", offset, VERT_BAR);
-            return false;
+        printf(" 0d%08" PRIu64 " %lc ", offset, VERT_BAR);
+        return false;
+    default:
+        if (bytes_read == 0) {
+            printf(" 0x%08" PRIx64 " %lc", offset, VERT_BAR);
+            return true;
         }
+        printf(" 0x%08" PRIx64 " %lc ", offset, VERT_BAR);
+        return false;
     }
 }
 
@@ -461,49 +456,42 @@ size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t b
 void calculate_gap_and_padding(size_t *gap, size_t *pad_chars)
 {
     switch (output) {
-        case O_BYTE: {
-            switch (format) {
-                case F_HEX: *pad_chars = 3; return;
-                case F_BIN: *pad_chars = 9; return;
-                case F_SIGNED: *pad_chars = 5; return;
-                default: *pad_chars = 4; return;
-            }
+    case O_BYTE: {
+        switch (format) {
+        case F_HEX: *pad_chars = 3; break;
+        case F_BIN: *pad_chars = 9; break;
+        case F_SIGNED: *pad_chars = 5; break;
+        default: *pad_chars = 4; break;
         }
-        case O_HALF_WORD: {
-            switch (format) {
-                case F_HEX: {
-                    *pad_chars = 5;
-                    *gap = *gap / 2;
-                    return;
-                }
-                case F_UNSIGNED: {
-                    *pad_chars = 6;
-                    *gap = *gap / 2;
-                    return;
-                }
-                default: {
-                    *pad_chars = 7;
-                    *gap = *gap / 2;
-                    return;
-                }
-            }
+        break;
+    }
+    case O_HALF_WORD: {
+        *gap = *gap / 2;
+        switch (format) {
+        case F_HEX:
+            *pad_chars = 5;
+            break;
+        case F_UNSIGNED:
+            *pad_chars = 6;
+            break;
+        default:
+            *pad_chars = 7;
+            break;
         }
-        case O_WORD: {
-            switch (format) {
-                case F_HEX: {
-                    *pad_chars = 9;
-                    *gap = *gap / 4;
-                    return;
-                }
-                case F_UNSIGNED: {
-                    *pad_chars = 11;
-                    *gap = *gap / 4;
-                    return;
-                }
-                default: {
-                    *pad_chars = 12;
-                    *gap = *gap / 4;
-                }
+        break;
+    }
+    case O_WORD: {
+        *gap = *gap / 4;
+        switch (format) {
+        case F_HEX:
+            *pad_chars = 9;
+            break;
+        case F_UNSIGNED:
+            *pad_chars = 11;
+            break;
+        default:
+            *pad_chars = 12;
+            break;
             }
         }
     }
@@ -517,32 +505,28 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
     size_t pos = 0;
 
     switch (format) {
-        case F_HEX: {
-            pos = write_hex_dump(line_buf, buffer, bytes_read);
-            break;
+    case F_HEX:
+        pos = write_hex_dump(line_buf, buffer, bytes_read);
+        break;
+    case F_OCT:
+        pos = write_oct_dump(line_buf, buffer, bytes_read);
+        break;
+    case F_UNSIGNED:
+        pos = write_unsigned_dump(line_buf, buffer, bytes_read);
+        break;
+    case F_SIGNED:
+        pos = write_signed_dump(line_buf, buffer, bytes_read);
+        break;
+    case F_BIN: {
+        for (size_t i = 0; i < bytes_read; i++) {
+            char bitstring[9];
+            byte_to_binary_string(buffer[i], bitstring);
+            pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%s ", bitstring);
         }
-        case F_OCT: {
-            pos = write_oct_dump(line_buf, buffer, bytes_read);
-            break;
-        }
-        case F_UNSIGNED: {
-            pos = write_unsigned_dump(line_buf, buffer, bytes_read);
-            break;
-        }
-        case F_SIGNED: {
-            pos = write_signed_dump(line_buf, buffer, bytes_read);
-            break;
-        }
-        case F_BIN: {
-            for (size_t i = 0; i < bytes_read; i++) {
-                char bitstring[9];
-                byte_to_binary_string(buffer[i], bitstring);
-                pos += snprintf(&line_buf[pos], sizeof(line_buf) - pos, "%s ", bitstring);
-            }
-            break;
-        }
-        default:
-            break;
+        break;
+    }
+    default:
+        break;
     }
 
     /* Handle the padding for partial lines. */
@@ -562,34 +546,24 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 
 void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
-    char ascii_buf[ASCII_BUF_SIZE];
-    size_t pos = 0;
-
     for (size_t i = 0; i < bytes_read; i++) {
         if (buffer[i] >= 0x20 && buffer[i] < 0x7F) {
-            ascii_buf[pos++] = (char)buffer[i];
+            putchar(buffer[i]);
         } else {
-            /* Add the UTF-8 bytes for MID_DOT. */
-            ascii_buf[pos++] = (char)0xC2;
-            ascii_buf[pos++] = (char)0xB7;
+            printf("%lc", MID_DOT);
         }
     }
 
     /* Handle the padding gap. */
     if (bytes_read < line_width) {
         const size_t gap = line_width - bytes_read;
-        memset(&ascii_buf[pos], ' ', gap);
-        pos += gap;
+        for (size_t i = 0; i < gap; i++) {
+            putchar(' ');
+        }
     }
 
     /* Add the final VERT_BAR. */
-    ascii_buf[pos++] = ' ';
-    ascii_buf[pos++] = (char)0xE2;
-    ascii_buf[pos++] = (char)0x94;
-    ascii_buf[pos++] = (char)0x82;
-    ascii_buf[pos++] = '\n';
-
-    fwrite(ascii_buf, 1, pos, stdout);
+    printf(" %lc\n", VERT_BAR);
 }
 
 
@@ -813,65 +787,62 @@ int main(const int argc, char *argv[])
 
     while ((opt = getopt_long(argc, argv, "xodSHWBLbns:r:l:hV", longopts, nullptr)) != -1) {
         switch(opt) {
-            case 'x':
-                format = F_HEX;
-                break;
-            case 'd':
-                format = F_UNSIGNED;
-                break;
-            case 'S':
-                format = F_SIGNED;
-                break;
-            case 'o':
-                format = F_OCT;
-                break;
-            case 'b':
-                format = F_BIN;
-                /* For binary output, set the default line width to 8. */
-                line_width = 8;
-                break;
-            case 'H':
-                output = O_HALF_WORD;
-                break;
-            case 'W':
-                output = O_WORD;
-                break;
-            case 'L':
-                little_endian = true;
-                break;
-            case 'B':
-                little_endian = false;
-                break;
-            case 'n':
-                elide = false;
-                break;
-            case 's': {
-                offset = (int32_t)validate_numeric_arg(optarg, 0, "--start-offset");
-                break;
-            }
-            case 'r': {
-                read_size = (size_t)validate_numeric_arg(optarg, 0, "--read-size");
-                break;
-            }
-            case 'l': {
-                line_width = (uint8_t)validate_numeric_arg(optarg, 255, "--line-width");
-                break;
-            }
-            case 'V':
-                printf("%s version %s\n", APPNAME, APPVERSION);
-                printf("%s compiled on %s at %s\n",
-                       strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__,
-                       __DATE__, __TIME__);
-                exit(EXIT_SUCCESS);
-            case 'h':
-                show_help();
-                exit(EXIT_SUCCESS);
-            case ':':
-            case '?':
-            default:
-                /* getopt_long prints own error message. */
-                show_help();
-                exit(EXIT_FAILURE);
+        case 'x':
+            format = F_HEX;
+            break;
+        case 'd':
+            format = F_UNSIGNED;
+            break;
+        case 'S':
+            format = F_SIGNED;
+            break;
+        case 'o':
+            format = F_OCT;
+            break;
+        case 'b':
+            format = F_BIN;
+            /* For binary output, set the default line width to 8. */
+            line_width = 8;
+            break;
+        case 'H':
+            output = O_HALF_WORD;
+            break;
+        case 'W':
+            output = O_WORD;
+            break;
+        case 'L':
+            little_endian = true;
+            break;
+        case 'B':
+            little_endian = false;
+            break;
+        case 'n':
+            elide = false;
+            break;
+        case 's':
+            offset = (int32_t)validate_numeric_arg(optarg, 0, "--start-offset");
+            break;
+        case 'r':
+            read_size = (size_t)validate_numeric_arg(optarg, 0, "--read-size");
+            break;
+        case 'l':
+            line_width = (uint8_t)validate_numeric_arg(optarg, 255, "--line-width");
+            break;
+        case 'V':
+            printf("%s version %s\n", APPNAME, APPVERSION);
+            printf("%s compiled on %s at %s\n",
+                   strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__,
+                   __DATE__, __TIME__);
+            exit(EXIT_SUCCESS);
+        case 'h':
+            show_help();
+            exit(EXIT_SUCCESS);
+        case ':':
+        case '?':
+        default:
+            /* getopt_long prints own error message. */
+            show_help();
+            exit(EXIT_FAILURE);
         }
     }
 
