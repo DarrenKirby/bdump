@@ -26,14 +26,14 @@ debug:
 # Install target
 install: $(TARGET)
 	@mkdir -p $(PREFIX)/bin
-	@mkdir -p $(PREFIX)/share/man1/
-	@install -m -v 0755 bdump $(PREFIX)/bin
-	@install -m -v 0644 bdump.1 $(PREFIX)/share/man1/
+	@mkdir -p $(PREFIX)/share/man/man1
+	@install -v -m 0755 bdump $(PREFIX)/bin
+	@install -v -m 0644 bdump.1 $(PREFIX)/share/man/man1
 
 # Uninstall target
 uninstall:
 	@rm -v $(PREFIX)/bin/$(TARGET)
-	@rm -v $(PREFIX)/share/man1/$(MAN_TARGET)
+	@rm -v $(PREFIX)/share/man/man1/$(MAN_TARGET)
 
 # Clean up build artifacts
 .PHONY: clean all install uninstall
