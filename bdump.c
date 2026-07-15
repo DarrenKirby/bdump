@@ -64,7 +64,7 @@ static constexpr char oct_chars[] = "01234567";
 
 /* 255 * 2 = 510 bytes + 5 more:
  * (space + 3-byte UTF-8 vbar + newline. */
-#define ASCII_BUF_SIZE 515
+#define ASCII_BUF_SIZE ((255 * 2) + 5)
 
 /* L1/L2 cache friendly read-buffer size. */
 #define CHUNK_SIZE 8192
