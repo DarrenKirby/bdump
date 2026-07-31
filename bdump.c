@@ -31,7 +31,7 @@
 #include <sys/ioctl.h>
 
 #define APP_NAME "bdump"
-#define APP_VERSION "1.0.1"
+#define APP_VERSION "2.0.0"
 
 /* Constants for box-drawing, and others. */
 #define WELL_WIDTH 12
@@ -120,9 +120,9 @@ Options:\n\
         -B, --big-endian\t output in big-endian\n\n\
     General options:\n\
         -n, --no-elide\t\t don't elide lines of NULL bytes\n\
-        -l, --line-width=n\t print n bytes per line\n\
-        -s, --start-offset=n\t start output at offset n\n\
-        -r, --read-size=n\t read only n bytes\n\
+        -l, --line-width=N\t print N bytes per line\n\
+        -s, --skip-bytes=N\t start output at offset N\n\
+        -r, --read-bytes=N\t read only N bytes\n\
         -h, --help\t\t display this help\n\
         -V, --version\t\t display version information\n\n\
 Report bugs to <darren@dragonbyte.ca>\n", APP_NAME);
@@ -784,8 +784,8 @@ int main(const int argc, char *argv[])
         { .name = "little-endian", .has_arg = no_argument,       .flag = nullptr, .val = 'L' },
         { .name = "bin",           .has_arg = no_argument,       .flag = nullptr, .val = 'b' },
         { .name = "no-elide",      .has_arg = no_argument,       .flag = nullptr, .val = 'n' },
-        { .name = "start-offset",  .has_arg = required_argument, .flag = nullptr, .val = 's' },
-        { .name = "read-size",     .has_arg = required_argument, .flag = nullptr, .val = 'r' },
+        { .name = "skip-bytes",    .has_arg = required_argument, .flag = nullptr, .val = 's' },
+        { .name = "read-bytes",    .has_arg = required_argument, .flag = nullptr, .val = 'r' },
         { .name = "line-width",    .has_arg = required_argument, .flag = nullptr, .val = 'l' },
         { .name = "help",          .has_arg = no_argument,       .flag = nullptr, .val = 'h' },
         { .name = "version",       .has_arg = no_argument,       .flag = nullptr, .val = 'V' },
