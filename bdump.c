@@ -17,7 +17,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -31,8 +30,8 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
-#define APPNAME "bdump"
-#define APPVERSION "1.0.0"
+#define APP_NAME "bdump"
+#define APP_VERSION "1.0.1"
 
 /* Constants for box-drawing, and others. */
 #define WELL_WIDTH 12
@@ -45,9 +44,9 @@
 
 /* Determine machine endianess for default output. */
 #ifndef __BYTE_ORDER__
-bool little_endian = true;
+static bool little_endian = true;
 #else
-bool little_endian = (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
+static bool little_endian = (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 #endif
 
 /* Static lookup tables for formatting hex and oct strings. */
@@ -63,7 +62,7 @@ static constexpr char oct_chars[] = "01234567";
 #define MAX_LINE_BUF_LEN ((255 * 9) + 32)
 
 /* 255 * 2 = 510 bytes + 5 more:
- * (space + 3-byte UTF-8 vbar + newline. */
+ * (space + 3-byte UTF-8 vertical bar + newline. */
 #define ASCII_BUF_SIZE ((255 * 2) + 5)
 
 /* L1/L2 cache friendly read-buffer size. */
@@ -83,20 +82,27 @@ typedef enum : int8_t {
     O_WORD
 } output_t;
 
+typedef struct {
+    unsigned short r;
+    unsigned short c;
+} term_dim_t;
+
+static term_dim_t dims;
+
 /* Default format: hex */
-format_t format = F_HEX;
+static format_t format = F_HEX;
 /* Default output: single bytes. */
-output_t output = O_BYTE;
+static output_t output = O_BYTE;
 /* Default line_width: 16 */
-uint8_t line_width = 16;
+static uint8_t line_width = 16;
 /* Default is to read all bytes. This value will be filled by
  * call to stat() if --read-size is not used. */
-size_t read_size = 0;
+static size_t read_size = 0;
 /* This does not change per run, so cache it. */
-int32_t bin_width;
+static int32_t bin_width;
 
 
-void show_help(void)
+static void show_help()
 {
     printf("Usage: %s [OPTION(s)] [FILE]\n\n\
 Options:\n\
@@ -119,11 +125,11 @@ Options:\n\
         -r, --read-size=n\t read only n bytes\n\
         -h, --help\t\t display this help\n\
         -V, --version\t\t display version information\n\n\
-Report bugs to <darren@dragonbyte.ca>\n", APPNAME);
+Report bugs to <darren@dragonbyte.ca>\n", APP_NAME);
 }
 
 
-size_t get_file_size(const int fd)
+static size_t get_file_size(const int fd)
 {
     struct stat buf;
     if (fstat(fd, &buf) == -1) {
@@ -141,12 +147,13 @@ size_t get_file_size(const int fd)
 
 /* The value returned by this function only really
  * affects the length of the horizontal lines. */
-int32_t get_term_width(void)
+static term_dim_t get_term_dimensions()
 {
     /* Check if stdout is redirected to a file or a pipe. */
     if (!isatty(STDOUT_FILENO)) {
         /* This is width of default line-width with hex output. */
-        return 82;
+        term_dim_t t_dims = { .r = 25, .c = 82};
+        return t_dims;
     }
 
     struct winsize w;
@@ -155,13 +162,14 @@ int32_t get_term_width(void)
             strerror(errno));
         exit(EXIT_FAILURE);
     }
-    return w.ws_col;
+    const term_dim_t t_dims = {.r = w.ws_row, .c = w.ws_col};
+    return t_dims;
 }
 
 
 /* Calculate the width of the binary section based on output
  * format and line_width. */
-int32_t get_bin_width(void)
+static int32_t get_bin_width()
 {
     int n_groups;
     switch (output) {
@@ -216,7 +224,7 @@ int32_t get_bin_width(void)
 }
 
 
-void byte_to_binary_string(const uint8_t byte, char *str)
+static void byte_to_binary_string(const uint8_t byte, char *str)
 {
     /* 0x80 is 10000000 in binary (the Most Significant Bit). */
     for (int i = 0; i < 8; i++) {
@@ -228,7 +236,7 @@ void byte_to_binary_string(const uint8_t byte, char *str)
 
 /* Write the offset well section of output. Returns a boolean
  * indicating if we have printed the last data line. */
-bool write_well(const uint64_t offset, const size_t bytes_read)
+static bool write_well(const uint64_t offset, const size_t bytes_read)
 {
     switch (format) {
     case F_OCT:
@@ -296,16 +304,16 @@ static uint32_t parse_word(const uint8_t a, const uint8_t b, const uint8_t c, co
 /* Zero-pad incomplete word groupings. */
 static uint32_t load_word(const uint8_t *buf, size_t remaining)
 {
-    uint8_t a = remaining > 0 ? buf[0] : 0;
-    uint8_t b = remaining > 1 ? buf[1] : 0;
-    uint8_t c = remaining > 2 ? buf[2] : 0;
-    uint8_t d = remaining > 3 ? buf[3] : 0;
+    const uint8_t a = remaining > 0 ? buf[0] : 0;
+    const uint8_t b = remaining > 1 ? buf[1] : 0;
+    const uint8_t c = remaining > 2 ? buf[2] : 0;
+    const uint8_t d = remaining > 3 ? buf[3] : 0;
 
     return parse_word(a, b, c, d);
 }
 
 
-size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
+static size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
 {
     size_t pos = 0;
 
@@ -349,7 +357,7 @@ size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_
 }
 
 
-size_t write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
+static size_t write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
     size_t pos = 0;
 
     if (output == O_BYTE) {
@@ -400,7 +408,7 @@ size_t write_oct_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_
 }
 
 
-size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
+static size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read) {
     size_t pos = 0;
 
     if (output == O_BYTE) {
@@ -426,7 +434,7 @@ size_t write_signed_dump(char *line_buf, const uint8_t *buffer, const size_t byt
 }
 
 
-size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
+static size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t bytes_read)
 {
     size_t pos = 0;
 
@@ -453,7 +461,7 @@ size_t write_unsigned_dump(char *line_buf, const uint8_t *buffer, const size_t b
 }
 
 
-void calculate_gap_and_padding(size_t *gap, size_t *pad_chars)
+static void calculate_gap_and_padding(size_t *gap, size_t *pad_chars)
 {
     switch (output) {
     case O_BYTE: {
@@ -499,7 +507,7 @@ void calculate_gap_and_padding(size_t *gap, size_t *pad_chars)
 
 
 /* Write the binary dump section of output. */
-void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
+static void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 {
     char line_buf[MAX_LINE_BUF_LEN];
     size_t pos = 0;
@@ -544,7 +552,7 @@ void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 }
 
 
-void write_ascii(const uint8_t *buffer, const size_t bytes_read)
+static void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
     for (size_t i = 0; i < bytes_read; i++) {
         if (buffer[i] >= 0x20 && buffer[i] < 0x7F) {
@@ -568,7 +576,7 @@ void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 
 
 /* Write the output. */
-void write_output(const uint8_t *buffer, const uint64_t offset, const size_t bytes_read)
+static void write_output(const uint8_t *buffer, const uint64_t offset, const size_t bytes_read)
 {
     if (write_well(offset, bytes_read)) {
         /* Write the vertical bars for the last line. */
@@ -589,7 +597,7 @@ void write_output(const uint8_t *buffer, const uint64_t offset, const size_t byt
 }
 
 
-void print_elide_line(const uint32_t n_lines)
+static void print_elide_line(const uint32_t n_lines)
 {
     /* We need the length of msg to calculate padding,
      * so format the message into a temporary buffer. */
@@ -627,14 +635,12 @@ void print_elide_line(const uint32_t n_lines)
 
 
 /* Print the Unicode box-drawing chars to the screen. */
-void print_banner(const char* filename)
+static void print_banner(const char* filename)
 {
-    /* Get the terminal width. */
-    const int32_t term_width = get_term_width();
     /* Get the ascii string section width. */
     const int32_t ascii_width = line_width + 2;
     /* Calculate how many more columns left in the row. */
-    const int32_t cols_left = term_width - ascii_width - bin_width - WELL_WIDTH - 3;
+    const int32_t cols_left = dims.c - ascii_width - bin_width - WELL_WIDTH - 3;
 
     /* First line...
      * Print the horizontal line over the well. */
@@ -644,7 +650,7 @@ void print_banner(const char* filename)
     /* Print the '┬' */
     printf("%lc", DOWN_T);
     /* Complete the horizontal line to end of terminal. */
-    const int rest = term_width - WELL_WIDTH - 1;
+    const int rest = dims.c - WELL_WIDTH - 1;
     for (int i = 0; i < rest; i++) {
         printf("%lc", HORT_BAR);
     }
@@ -688,7 +694,7 @@ void print_banner(const char* filename)
 }
 
 
-void print_footer(void)
+static void print_footer()
 {
     for (int i = 0; i < WELL_WIDTH; i++) {
         printf("%lc", HORT_BAR);
@@ -703,14 +709,14 @@ void print_footer(void)
         printf("%lc", HORT_BAR);
     }
     printf("%lc", UP_T);
-    const int32_t rest = get_term_width() - WELL_WIDTH - bin_width - ascii_width - 3;
+    const int32_t rest = dims.c - WELL_WIDTH - bin_width - ascii_width - 3;
     for (int i = 0; i < rest; i++) {
         printf("%lc", HORT_BAR);
     }
 }
 
 
-int64_t validate_numeric_arg(const char* arg, const int32_t max_val, const char* flag)
+static int64_t validate_numeric_arg(const char* arg, const int32_t max_val, const char* flag)
 {
     /* 'Special value' 0 for base is interpreted as decimal,
      * or hex/oct if 0x or 0 prefix is present. */
@@ -764,28 +770,29 @@ int main(const int argc, char *argv[])
     uint32_t n_elided = 0;
     /* Flag for whether to elide or not. */
     bool elide = true;
+    /* Get the terminal width. */
+    dims = get_term_dimensions();
 
     const struct option longopts[] = {
-        {"hex",           no_argument,       nullptr, 'x'},
-        {"oct",           no_argument,       nullptr, 'o'},
-        {"unsigned",      no_argument,       nullptr, 'd'},
-        {"signed",        no_argument,       nullptr, 'S'},
-        {"half-word",     no_argument,       nullptr, 'H'},
-        {"word",          no_argument,       nullptr, 'W'},
-        {"big-endian",    no_argument,       nullptr, 'B'},
-        {"little-endian", no_argument,       nullptr, 'L'},
-        {"bin",           no_argument,       nullptr, 'b'},
-        {"no-elide",      no_argument,       nullptr, 'n'},
-        {"start-offset",  required_argument, nullptr, 's'},
-        {"read-size",     required_argument, nullptr, 'r'},
-        {"line-width",    required_argument, nullptr, 'l'},
-        {"help",          no_argument,       nullptr, 'h'},
-        {"version",       no_argument,       nullptr, 'V'},
-        {nullptr,0,nullptr,0}
+        { .name = "hex",           .has_arg = no_argument,       .flag = nullptr, .val = 'x' },
+        { .name = "oct",           .has_arg = no_argument,       .flag = nullptr, .val = 'o' },
+        { .name = "unsigned",      .has_arg = no_argument,       .flag = nullptr, .val = 'd' },
+        { .name = "signed",        .has_arg = no_argument,       .flag = nullptr, .val = 'S' },
+        { .name = "half-word",     .has_arg = no_argument,       .flag = nullptr, .val = 'H' },
+        { .name = "word",          .has_arg = no_argument,       .flag = nullptr, .val = 'W' },
+        { .name = "big-endian",    .has_arg = no_argument,       .flag = nullptr, .val = 'B' },
+        { .name = "little-endian", .has_arg = no_argument,       .flag = nullptr, .val = 'L' },
+        { .name = "bin",           .has_arg = no_argument,       .flag = nullptr, .val = 'b' },
+        { .name = "no-elide",      .has_arg = no_argument,       .flag = nullptr, .val = 'n' },
+        { .name = "start-offset",  .has_arg = required_argument, .flag = nullptr, .val = 's' },
+        { .name = "read-size",     .has_arg = required_argument, .flag = nullptr, .val = 'r' },
+        { .name = "line-width",    .has_arg = required_argument, .flag = nullptr, .val = 'l' },
+        { .name = "help",          .has_arg = no_argument,       .flag = nullptr, .val = 'h' },
+        { .name = "version",       .has_arg = no_argument,       .flag = nullptr, .val = 'V' },
+        { .name = nullptr,         .has_arg = no_argument,       .flag = nullptr, .val = 0 }
     };
 
-
-    while ((opt = getopt_long(argc, argv, "xodSHWBLbns:r:l:hV", longopts, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "xodSHWBLbnCs:r:l:hV", longopts, nullptr)) != -1) {
         switch(opt) {
         case 'x':
             format = F_HEX;
@@ -829,7 +836,7 @@ int main(const int argc, char *argv[])
             line_width = (uint8_t)validate_numeric_arg(optarg, 255, "--line-width");
             break;
         case 'V':
-            printf("%s version %s\n", APPNAME, APPVERSION);
+            printf("%s version %s\n", APP_NAME, APP_VERSION);
             printf("%s compiled on %s at %s\n",
                    strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__,
                    __DATE__, __TIME__);
@@ -918,7 +925,7 @@ int main(const int argc, char *argv[])
 
     while (read_size > 0) {
         /* Determine how much to read into the big block. */
-        const size_t to_read = (read_size < CHUNK_SIZE) ? read_size : CHUNK_SIZE;
+        const size_t to_read = read_size < CHUNK_SIZE ? read_size : CHUNK_SIZE;
         const size_t bytes_read = fread(file_buf, 1, to_read, input);
 
         if (bytes_read == 0) break;
@@ -926,7 +933,7 @@ int main(const int argc, char *argv[])
         size_t i = 0;
         /* Slice the big block into line_width chunks. */
         while (i < bytes_read) {
-            const size_t chunk_len = (bytes_read - i < line_width) ? bytes_read - i : line_width;
+            const size_t chunk_len = bytes_read - i < line_width ? bytes_read - i : line_width;
 
             if (elide) {
                 const bool is_zero = memcmp(&file_buf[i], zero_block, chunk_len) == 0;
