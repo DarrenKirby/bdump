@@ -339,7 +339,6 @@ static size_t write_hex_dump(char *line_buf, const uint8_t *buffer, const size_t
         return pos;
     }
 
-
     for (size_t i = 0; i < bytes_read; i+=4) {
         const uint32_t word = load_word(&buffer[i], bytes_read - i);
 
@@ -552,6 +551,7 @@ static void write_binary_dump(const uint8_t *buffer, const size_t bytes_read)
 }
 
 
+/* Write the ascii output well. */
 static void write_ascii(const uint8_t *buffer, const size_t bytes_read)
 {
     for (size_t i = 0; i < bytes_read; i++) {
@@ -840,16 +840,16 @@ int main(const int argc, char *argv[])
             printf("%s compiled on %s at %s\n",
                    strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__,
                    __DATE__, __TIME__);
-            exit(EXIT_SUCCESS);
+            return EXIT_SUCCESS;
         case 'h':
             show_help();
-            exit(EXIT_SUCCESS);
+            return EXIT_SUCCESS;
         case ':':
         case '?':
         default:
             /* getopt_long prints own error message. */
             show_help();
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
     }
 
@@ -881,7 +881,7 @@ int main(const int argc, char *argv[])
         if (!input) {
             fprintf(stderr, "failed to open %s: %s\n",
                 argv[optind], strerror(errno));
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
         filename = argv[optind];
     } else {
