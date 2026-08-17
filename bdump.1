@@ -90,7 +90,8 @@ Combine 4 bytes into full-word groupings.
 .TP
 \fB-B or --big-endian\fP
 Display half and full-word groupings in either little-endian or big-endian byte order. The default if neither of these
-options is specified is to display using the byte order of the underlying machine.
+options is specified is to display using the byte order of the underlying machine, or little-endian if byte order cannot
+be determined at run time.
 .TP
 \fB-n or --no-elide\fP
 By default, 2+ lines of just zero bytes (NULLs) are elided, and replaced with a message which states how many lines
