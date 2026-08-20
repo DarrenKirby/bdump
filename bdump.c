@@ -31,7 +31,7 @@
 #include <sys/ioctl.h>
 
 #define APP_NAME "bdump"
-#define APP_VERSION "2.0.0"
+#define APP_VERSION "2.1.0"
 
 /* Constants for box-drawing, and others. */
 #define WELL_WIDTH 12
@@ -67,6 +67,9 @@ static constexpr char oct_chars[] = "01234567";
 
 /* L1/L2 cache friendly read-buffer size. */
 #define CHUNK_SIZE 8192
+
+#define ANSI_GREY      "\x1b[38;5;250m"
+#define ANSI_RESET     "\x1b[0m"
 
 typedef enum : int8_t {
     F_HEX,
@@ -899,15 +902,15 @@ int main(const int argc, char *argv[])
     /* Call fseek() if --start-offset is used. */
     if (offset != 0) {
         if (fseeko(input, (off_t)offset, SEEK_SET) < 0) {
-            /* fseek() fails on pipes. We must manually consume and discard 
+            /* fseek() fails on pipes. We must manually consume and discard
              * 'offset' bytes to reach the correct starting position in the stream. */
             size_t bytes_to_discard = offset;
             uint8_t discard_buf[CHUNK_SIZE];
-            
+
             while (bytes_to_discard > 0) {
                 const size_t grab = (bytes_to_discard < sizeof(discard_buf)) ? bytes_to_discard : sizeof(discard_buf);
                 const size_t read_in = fread(discard_buf, 1, grab, input);
-                
+
                 if (read_in == 0) {
                     break; /* EOF reached before we even hit the offset. */
                 }
