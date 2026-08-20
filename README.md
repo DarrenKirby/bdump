@@ -3,11 +3,11 @@
 A modern-ish remake of `od`, `hexdump`, `xxd`, and similar byte-dumping utilities. The look and feel is largely inspired by 
 [bat](https://github.com/sharkdp/bat).
 
-![A screenshot of bdump](./img/screenshot1.png "Screenshot 1")
+![A screenshot of bdump](https://raw.githubusercontent.com/DarrenKirby/bdump/main/img/screenshot1.png "Screenshot 1")
 
-![A screenshot of bdump](./img/screenshot2.png "Screenshot 2")
+![A screenshot of bdump](https://raw.githubusercontent.com/DarrenKirby/bdump/main/img/screenshot2.png "Screenshot 2")
 
-![A screenshot of bdump](./img/screenshot3.png "Screenshot 3")
+![A screenshot of bdump](https://raw.githubusercontent.com/DarrenKirby/bdump/main/img/screenshot3.png "Screenshot 3")
 
 
 ## Synopsis
@@ -156,10 +156,10 @@ Darren Kirby [darren@dragonbyte.ca](mailto:darren@dragonbyte.ca)
 
 A simple `make` in the project root will generally do the trick. To install try `make install`. 
 You can also pass variables to affect compilation/installation, eg: `make CC=/my/custom/gcc` or
-`make install PREFIX=/my/cestom/install/path`.
+`make install PREFIX=/my/custom/install/path`.
 
 Note that `bdump` uses contemporary C23 coding standards, and as such, older compilers may have issues. 
 GCC 14+ and LLVM/Clang 19+ should be fine.
 
 If you are stuck with an older compiler and the build fails, try changing the `constexpr`s on lines 54 and 55 of
-the source to jut `const` and it should build.
+the source to just `const` and it should build.
